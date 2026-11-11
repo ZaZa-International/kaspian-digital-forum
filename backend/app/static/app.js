@@ -1,5 +1,11 @@
-/* Caspian Twin frontend: map + chart + scenario simulator. No framework. */
+/* Smart Caspian Transit frontend: map + compare + shipment twin + clearance. */
 const $ = (s) => document.querySelector(s);
+let storm = false;
+let map, polylines = {};
+let shipments = [];
+let currentShipment = null;
+const MODE_RU = { rail: "🚂 ж/д", sea: "⛴ море", road: "🚛 авто" };
+const ROUTE_COLORS = { R1: "#0e7aa8", R2: "#1e7d46", R3: "#c96a12" };
 
 async function getJSON(url, opts) {
   const r = await fetch(url, opts);
@@ -7,94 +13,116 @@ async function getJSON(url, opts) {
   return r.json();
 }
 
-let map, chart;
-let simYear = 2040, simScenario = "baseline";
-
-const STATUS_RU = { ok: "В норме", warning: "Риск", critical: "Критично" };
+function riskPill(p) {
+  const cls = p < 0.3 ? "ok" : p < 0.6 ? "medium" : "high";
+  const txt = p < 0.3 ? "низкий" : p < 0.6 ? "средний" : "высокий";
+  return `<span class="pill ${cls}">${txt} (${Math.round(p * 100)}%)</span>`;
+}
 
 async function initMap() {
-  map = L.map("map").setView([43.5, 50.5], 5);
+  map = L.map("map").setView([43.5, 50.0], 4);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 12, attribution: '&copy; OpenStreetMap',
+    maxZoom: 12, attribution: "&copy; OpenStreetMap",
   }).addTo(map);
-  const data = await getJSON("/api/ports");
-  L.polygon(data.sea_polygon, { color: "#0e7aa8", weight: 2, fillOpacity: 0.18 }).addTo(map)
-    .bindPopup("Каспийское море — крупнейший замкнутый водоём планеты");
-  data.ports.forEach((p) => {
-    L.circleMarker([p.lat, p.lon], { radius: 7, color: "#0e7aa8", fillColor: "#0e7aa8", fillOpacity: 0.9 })
-      .addTo(map)
-      .bindPopup(`<b>${p.name}</b> (${p.country})<br>Глубина: ${p.depth_m} м<br>${p.cargo}`);
+  const routes = await getJSON("/api/routes");
+  routes.routes.forEach((r) => {
+    const pts = r.nodes.map((n) => [n.lat, n.lon]);
+    polylines[r.id] = L.polyline(pts, { color: ROUTE_COLORS[r.id], weight: 4, opacity: 0.85 })
+      .addTo(map).bindPopup(`<b>${r.id} · ${r.name}</b><br>${r.via}`);
   });
-  const st = await getJSON("/api/stations");
-  st.stations.forEach((s) => {
-    const col = s.status === "warning" ? "#b7791f" : "#1e7d46";
-    L.circleMarker([s.lat, s.lon], { radius: 6, color: col, fillColor: col, fillOpacity: 0.9 })
-      .addTo(map)
-      .bindPopup(`<b>${s.name}</b><br>Температура: ${s.temp_c} °C<br>Индекс загрязнения: ${s.pollution_index}/100`);
-  });
-  st.protected_areas.forEach((a) => {
-    L.circleMarker([a.lat, a.lon], { radius: 8, color: "#d4a017", fillColor: "#f5d76e", fillOpacity: 0.8 })
-      .addTo(map).bindPopup(`<b>${a.name}</b><br>${a.note}`);
+  const nodes = await getJSON("/api/nodes");
+  nodes.nodes.forEach((n) => {
+    L.circleMarker([n.lat, n.lon], { radius: 6, color: "#06283d", fillColor: "#fff", fillOpacity: 1, weight: 2 })
+      .addTo(map).bindPopup(`<b>${n.name}</b> (${n.country})<br>${n.kind}`);
   });
 }
 
-async function initChart() {
-  const hist = await getJSON("/api/level/history");
-  const fc = await getJSON("/api/level/forecast?scenario=baseline&year=2050");
-  const ctx = $("#chart").getContext("2d");
-  chart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels: hist.series.map((p) => p.year).concat(fc.series.map((p) => p.year)),
-      datasets: [
-        { label: "История (демо-ряд)", data: hist.series.map((p) => p.level_m), borderColor: "#0e7aa8", tension: 0.2 },
-        { label: "Прогноз, базовый", data: hist.series.map(() => null).concat(fc.series.map((p) => p.level_m)), borderColor: "#c0392b", borderDash: [6, 4], tension: 0.2 },
-      ],
-    },
-    options: { responsive: true, plugins: { legend: { position: "bottom" } },
-      scales: { y: { title: { display: true, text: "Уровень, м" } } } },
-  });
-  $("#kpi-level").textContent = hist.current.level_m + " м";
+async function loadCompare() {
+  const data = await getJSON(`/api/compare?weight_t=48&storm=${storm}`);
+  $("#compare-table tbody").innerHTML = data.routes.map((r) => `
+    <tr><td><b>${r.route_id}</b> ${r.route_name}<br><span class="hint">${r.via}</span></td>
+    <td>${r.total_predicted_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
+    <td>${(r.co2_kg / 1000).toFixed(1)} т</td><td>$${r.cost_usd.toLocaleString("ru-RU")}</td>
+    <td>${r.route_id === data.best.time ? "⏱ быстрее" : ""} ${r.route_id === data.best.co2 ? "🌱 чище" : ""} ${r.route_id === data.best.risk ? "🛡 надёжнее" : ""}</td></tr>`).join("");
+  const best = data.routes.find((r) => r.route_id === data.best.co2);
+  $("#kpi-co2").textContent = `${best.route_id}: ${(best.co2_kg / 1000).toFixed(1)} т CO₂`;
+  const ports = await getJSON("/api/ports");
+  const worst = ports.ports.reduce((a, b) => (a.congestion_pct > b.congestion_pct ? a : b));
+  $("#kpi-port").textContent = `${worst.name}: ${worst.congestion_pct}%`;
 }
 
-async function runSim() {
-  const res = await getJSON("/api/scenarios/simulate", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ year: simYear, scenario: simScenario }),
-  });
-  $("#sim-verdict").textContent = `${res.year} · ${res.scenario.name} сценарий · уровень ${res.level_m} м (падение ${res.drop_m} м с 2026). ${res.verdict}`;
-  $("#kpi-risk").textContent = `${res.ports_at_risk} из ${res.ports.length}`;
-  $("#ports-table tbody").innerHTML = res.ports.map((p) => `
-    <tr><td><b>${p.name}</b></td><td>${p.country}</td><td>${p.depth_m} м</td>
-    <td>${p.remaining_depth_m} м</td>
-    <td><span class="pill ${p.status}">${STATUS_RU[p.status]}</span></td></tr>`).join("");
+async function loadShipments() {
+  const data = await getJSON("/api/shipments");
+  shipments = data.shipments;
+  $("#kpi-ship").textContent = shipments.length;
+  const avg = shipments.reduce((s, x) => s + x.delay_h, 0) / shipments.length;
+  $("#kpi-delay").textContent = `+${avg.toFixed(1)} ч`;
+  $("#shipment-select").innerHTML = shipments.map((s) =>
+    `<option value="${s.id}">${s.id} — ${s.name} (${s.route_name})</option>`).join("");
+  currentShipment = shipments[0].id;
+  await loadShipment();
 }
 
-async function initAlerts() {
-  const data = await getJSON("/api/alerts");
-  $("#alerts").innerHTML = data.alerts.map((a) => `
-    <li><span class="tag ${a.level}">${a.level === "warning" ? "⚠ внимание" : a.level === "ok" ? "✓ норма" : "ℹ инфо"}</span>
-    <b>${a.title}</b><br><span class="hint">${a.text} — ${a.place}, ${a.time}</span></li>`).join("");
+async function loadShipment() {
+  const s = await getJSON(`/api/shipments/${currentShipment}?storm=${storm}`);
+  $("#shipment-info").innerHTML =
+    `<b>${s.id} · ${s.name}</b> — ${s.cargo}, ${s.weight_t} т · ${s.status} · ETA ${s.eta}`;
+  const nameOf = {};
+  (await getJSON("/api/nodes")).nodes.forEach((n) => (nameOf[n.id] = n.name));
+  $("#timeline").innerHTML = s.forecast.legs.map((l) => `
+    <li class="${l.id === s.forecast.bottleneck_leg_id ? "bottleneck" : ""}">
+      <b>${MODE_RU[l.mode]} ${nameOf[l.from]} → ${nameOf[l.to]}</b>
+      ${l.id === s.forecast.bottleneck_leg_id ? " ⚠ узкое место" : ""}<br>
+      план ${l.base_h} ч → прогноз ${l.predicted_h} ч (+${l.delay_h} ч)<br>
+      <span class="why">${l.reasons.join("; ")}</span>
+    </li>`).join("");
+  $("#verdict").textContent =
+    `Прогноз: ${s.forecast.total_predicted_h} ч вместо ${s.forecast.total_base_h} ч ` +
+    `(+${s.forecast.delay_h} ч). ${s.forecast.recommendation} CO₂ маршрута: ${(s.forecast.co2_kg / 1000).toFixed(1)} т.`;
+  const docLabel = { verified: "проверен", pending: "на проверке", missing: "нет документа" };
+  $("#docs-list").innerHTML = Object.entries(s.docs).map(([k, v]) => `
+    <li><span class="dot ${v}"></span><b>${s.doc_types[k] || k}</b> — ${docLabel[v] || v}</li>`).join("");
+  $("#clearance-result").textContent = "";
+  await loadLedger();
+}
+
+async function loadLedger() {
+  const data = await getJSON("/api/clearance/ledger");
+  $("#ledger").innerHTML = data.entries.length ? data.entries.map((e) => `
+    <li>#${e.seq} · ${e.shipment_id} · <b>${e.decision === "pre-cleared" ? "✅ pre-cleared" : "⚠ нужны документы: " + e.missing.join(", ")}</b><br>
+    <span class="hash">hash ${e.hash.slice(0, 16)}… ← prev ${e.prev_hash.slice(0, 12)}…</span></li>`).join("")
+    : `<li class="hint">Пока пусто — отправьте груз на pre-clearance.</li>`;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await Promise.all([initMap(), initChart(), runSim(), initAlerts()]);
+    await Promise.all([initMap(), loadCompare(), loadShipments()]);
   } catch (e) {
     console.error(e);
-    $("#sim-verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
+    $("#verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
   }
-  $("#sim-year").addEventListener("input", (e) => {
-    simYear = +e.target.value;
-    $("#sim-year-label").textContent = simYear;
-    runSim();
+  $("#storm-btn").addEventListener("click", async () => {
+    storm = !storm;
+    $("#storm-btn").textContent = storm ? "🌩 Шторм на Каспии: ВКЛ" : "🌩 Шторм на Каспии: выкл";
+    $("#storm-btn").classList.toggle("on", storm);
+    $("#storm-note").textContent = storm
+      ? "Шторм: ветер 19 м/с, волна 3,4 м — паромы не выходят по расписанию, морские плечи +24 ч."
+      : "Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.";
+    await Promise.all([loadCompare(), loadShipment()]);
   });
-  document.querySelectorAll("#sim-scenarios button").forEach((b) => {
-    b.addEventListener("click", () => {
-      document.querySelectorAll("#sim-scenarios button").forEach((x) => x.classList.remove("active"));
-      b.classList.add("active");
-      simScenario = b.dataset.scenario;
-      runSim();
+  $("#shipment-select").addEventListener("change", (e) => {
+    currentShipment = e.target.value;
+    loadShipment();
+  });
+  $("#clearance-btn").addEventListener("click", async () => {
+    const s = shipments.find((x) => x.id === currentShipment);
+    const res = await getJSON("/api/clearance/submit", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shipment_id: s.id, docs: s.docs }),
     });
+    $("#clearance-result").textContent = res.decision === "pre-cleared"
+      ? `✅ Pre-clearance пройден. Запись #${res.seq} в реестре, hash ${res.hash.slice(0, 16)}…`
+      : `⚠ Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы».`;
+    await loadLedger();
   });
 });

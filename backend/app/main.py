@@ -1,6 +1,5 @@
-"""Caspian Twin — mini digital twin of the Caspian Sea.
-
-FastAPI backend + static frontend (no build step, no npm).
+"""Smart Caspian Transit — predictive digital twin of the North-South
+multimodal hub (Caspian link). FastAPI backend + static frontend.
 Run:  ./run.sh        (or: uvicorn app.main:app --reload, from backend/)
 Docs: /docs
 """
@@ -14,14 +13,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import data
+from app import data, model
 
 app = FastAPI(
-    title="Caspian Twin — цифровой двойник Каспия",
+    title="Smart Caspian Transit",
     description=(
-        "Мини-двойник Каспийского моря: уровень воды, порты, станции "
-        "мониторинга и сценарный прогноз до 2050 года. "
-        "Данные — демонстрационные (см. data.py)."
+        "Предиктивный цифровой двойник мультимодального хаба МТК "
+        "«Север–Юг»: прогноз задержек, pre-clearance таможни, "
+        "единое окно логиста с углеродным следом и альтернативными "
+        "маршрутами. Данные — демонстрационные."
     ),
     version="0.1.0",
 )
@@ -31,67 +31,100 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "caspian-twin", "data": "demo-seed"}
+    return {"status": "ok", "service": "smart-caspian-transit", "data": "demo-seed"}
 
 
-@app.get("/api/level/history")
-def level_history():
-    return {
-        "unit": "m (Baltic system)",
-        "source_note": "Illustrative series, trend ~-9 cm/yr per published data",
-        "series": data.LEVEL_HISTORY,
-        "current": {"year": data.CURRENT_YEAR, "level_m": data.CURRENT_LEVEL_M},
-        "area_km2": {"2006": data.AREA_2006_KM2, "2026": data.AREA_2026_KM2},
-    }
-
-
-@app.get("/api/level/forecast")
-def level_forecast(
-    scenario: str = Query("baseline", pattern="^(optimistic|baseline|pessimistic)$"),
-    year: int = Query(2050, ge=2027, le=2050),
-):
-    return {
-        "scenario": data.SCENARIOS[scenario],
-        "year": year,
-        "level_m": data.forecast_level(scenario, year),
-        "series": [
-            {"year": y, "level_m": data.forecast_level(scenario, y)}
-            for y in range(2026, 2051, 2)
-        ],
-    }
+@app.get("/api/nodes")
+def nodes():
+    return {"nodes": list(data.NODES.values())}
 
 
 @app.get("/api/ports")
 def ports():
-    return {"ports": data.PORTS, "sea_polygon": data.SEA_POLYGON}
+    out = []
+    for pid, p in data.PORTS.items():
+        out.append({**p, "name": data.NODES[pid]["name"],
+                    "lat": data.NODES[pid]["lat"], "lon": data.NODES[pid]["lon"]})
+    return {"ports": out}
 
 
-@app.get("/api/stations")
-def stations():
-    return {"stations": data.STATIONS, "protected_areas": data.PROTECTED_AREAS}
+@app.get("/api/weather")
+def weather():
+    return {"sea": data.WEATHER, "storm_scenario": data.STORM}
 
 
-@app.get("/api/alerts")
-def alerts():
-    return {"alerts": data.ALERTS}
+@app.get("/api/routes")
+def routes():
+    return {"routes": [
+        {**r, "nodes": [data.NODES[n] for n in
+                        [leg["from"] for leg in r["legs"]] + [r["legs"][-1]["to"]]]}
+        for r in data.ROUTES
+    ]}
 
 
-class SimulateRequest(BaseModel):
-    year: int = Field(2040, ge=2027, le=2050)
-    scenario: str = Field("baseline", pattern="^(optimistic|baseline|pessimistic)$")
+@app.get("/api/routes/{route_id}/forecast")
+def route_forecast(route_id: str, weight_t: float = Query(48, gt=0),
+                   storm: bool = False):
+    route = data.get_route(route_id)
+    if route is None:
+        raise HTTPException(404, f"unknown route {route_id}")
+    return model.forecast_route(route, weight_t, storm)
 
 
-@app.post("/api/scenarios/simulate")
-def simulate(req: SimulateRequest):
-    return data.simulate(req.year, req.scenario)
+@app.get("/api/compare")
+def compare(weight_t: float = Query(48, gt=0), storm: bool = False):
+    rows = model.compare_routes(weight_t, storm)
+    best_time = min(rows, key=lambda r: r["total_predicted_h"])["route_id"]
+    best_co2 = min(rows, key=lambda r: r["co2_kg"])["route_id"]
+    best_risk = min(rows, key=lambda r: r["delay_probability"])["route_id"]
+    return {"storm": storm, "weight_t": weight_t, "routes": rows,
+            "best": {"time": best_time, "co2": best_co2, "risk": best_risk}}
 
 
-@app.get("/api/scenarios")
-def scenarios():
-    return {"scenarios": list(data.SCENARIOS.values())}
+@app.get("/api/shipments")
+def shipments():
+    out = []
+    for s in data.SHIPMENTS:
+        route = data.get_route(s["route_id"])
+        fc = model.forecast_route(route, s["weight_t"])
+        out.append({**s, "route_name": route["name"],
+                    "delay_h": fc["delay_h"],
+                    "delay_probability": fc["delay_probability"],
+                    "co2_kg": fc["co2_kg"]})
+    return {"shipments": out}
 
 
-# --- frontend (must be last: catch-all would shadow /api otherwise) ---
+@app.get("/api/shipments/{shipment_id}")
+def shipment_detail(shipment_id: str, storm: bool = False):
+    s = data.get_shipment(shipment_id)
+    if s is None:
+        raise HTTPException(404, f"unknown shipment {shipment_id}")
+    route = data.get_route(s["route_id"])
+    return {**s, "route": route,
+            "forecast": model.forecast_route(route, s["weight_t"], storm),
+            "doc_types": data.DOC_TYPES}
+
+
+class ClearanceRequest(BaseModel):
+    shipment_id: str
+    docs: dict[str, str] = Field(default_factory=dict)
+
+
+@app.post("/api/clearance/submit")
+def clearance_submit(req: ClearanceRequest):
+    try:
+        entry = model.submit_clearance(req.shipment_id, req.docs)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return entry
+
+
+@app.get("/api/clearance/ledger")
+def clearance_ledger():
+    return {"entries": model.LEDGER, "chain_valid": model.verify_ledger()}
+
+
+# --- frontend ---
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
@@ -107,9 +140,5 @@ def index():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(
-        "app.main:app",
-        host=os.environ.get("HOST", "0.0.0.0"),
-        port=int(os.environ.get("PORT", "8000")),
-        reload=True,
-    )
+    uvicorn.run("app.main:app", host=os.environ.get("HOST", "0.0.0.0"),
+                port=int(os.environ.get("PORT", "8000")), reload=True)
