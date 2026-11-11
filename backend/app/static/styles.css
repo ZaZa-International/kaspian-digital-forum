@@ -33,6 +33,7 @@ select { padding:8px; border-radius:8px; border:1px solid #cbd6de; font-size:15p
 .timeline li.bottleneck { border-left-color:var(--bad); background:#fdf6f5; border-radius:0 8px 8px 0; padding-right:8px; }
 .timeline .why { color:var(--mut); font-size:13px; }
 .verdict { font-weight:600; background:#f0f7fa; border-left:4px solid var(--sea); padding:10px 12px; border-radius:6px; }
+.ml-box { background:#f6f0fa; border-left:4px solid #6b4fa1; padding:10px 12px; border-radius:6px; font-size:14px; }
 .docs, .ledger { list-style:none; margin:0 0 10px; padding:0; }
 .docs li, .ledger li { padding:8px 0; border-bottom:1px solid #e6edf1; font-size:14px; }
 .docs li:last-child, .ledger li:last-child { border-bottom:0; }

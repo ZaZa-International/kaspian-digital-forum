@@ -69,6 +69,22 @@ def test_clearance_missing_docs_then_fixed():
     assert ledger["entries"][1]["prev_hash"] == ledger["entries"][0]["hash"]
 
 
+def test_ml_info_and_forecast():
+    info = client.get("/api/ml/info").json()
+    assert info["n_train"] == 640 and info["n_test"] == 160
+    assert info["metrics"]["random_forest"]["r2"] > 0.6
+    assert info["metrics"]["random_forest"]["mae_h"] < 6
+    calm = client.get("/api/ml/forecast?route_id=R1&weight_t=48").json()
+    storm = client.get("/api/ml/forecast?route_id=R1&weight_t=48&storm=true").json()
+    assert storm["ml_delay_h"] > calm["ml_delay_h"]
+    assert calm["ml_delay_h"] >= 0
+    assert calm["top_factors"][0]["feature"] in (
+        "max_wave_m", "max_congestion_pct", "total_customs_h", "sea_km")
+    r3 = client.get("/api/ml/forecast?route_id=R3&weight_t=48&storm=true").json()
+    assert r3["features"]["sea_legs"] == 0
+    assert client.get("/api/ml/forecast?route_id=RX").status_code == 404
+
+
 def test_frontend_served():
     r = client.get("/")
     assert r.status_code == 200 and "Smart Caspian Transit" in r.text

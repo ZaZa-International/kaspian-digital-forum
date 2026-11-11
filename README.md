@@ -75,6 +75,19 @@ cd backend && python -m pytest -q
 
 API-документация: http://localhost:8000/docs
 
+## ML — что реально обучено
+
+- **Модель:** RandomForest (200 деревьев) + LinearRegression как baseline,
+  train/test 80/20, метрики — MAE и R², важность факторов.
+  Эндпоинты: `GET /api/ml/info`, `GET /api/ml/forecast`,
+  `GET /api/ml/shipment/{id}`. На фронте — блок «ML-прогноз» в двойнике
+  груза рядом со скорингом.
+- **Данные:** кейс не приложил исторических данных, поэтому модель
+  обучена на **синтетической истории из 800 рейсов** (seeded RNG,
+  правила коридора + шум). Это честно подписано в `/api/ml/info` и
+  на экране. Пайплайн настоящий: замена генератора на чтение CSV —
+  одна функция `ml._fit`, API и фронт не меняются.
+
 ## API
 
 - `GET /api/health`, `/api/nodes`, `/api/ports`, `/api/weather`

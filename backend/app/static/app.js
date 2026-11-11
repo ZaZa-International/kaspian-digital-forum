@@ -84,6 +84,13 @@ async function loadShipment() {
     <li><span class="dot ${v}"></span><b>${s.doc_types[k] || k}</b> — ${docLabel[v] || v}</li>`).join("");
   $("#clearance-result").textContent = "";
   await loadLedger();
+  const mlp = await getJSON(`/api/ml/shipment/${currentShipment}?storm=${storm}`);
+  const top = mlp.top_factors.map((f) => `${f.feature} (${f.importance})`).join(", ");
+  $("#ml-box").innerHTML =
+    `🤖 <b>ML-прогноз</b> (RandomForest, обучена на 800 синтетических рейсах): ` +
+    `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
+    `(расхождение ${mlp.difference_h} ч). Главные факторы: ${top}. ` +
+    `<span class="hint">Модель честно обучена на синтетике — реальных исторических данных в кейсе не было.</span>`;
 }
 
 async function loadLedger() {

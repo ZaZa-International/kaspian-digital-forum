@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import data, model
+from app import data, ml, model
 
 app = FastAPI(
     title="Smart Caspian Transit",
@@ -122,6 +122,28 @@ def clearance_submit(req: ClearanceRequest):
 @app.get("/api/clearance/ledger")
 def clearance_ledger():
     return {"entries": model.LEDGER, "chain_valid": model.verify_ledger()}
+
+
+@app.get("/api/ml/info")
+def ml_info():
+    return ml.info()
+
+
+@app.get("/api/ml/forecast")
+def ml_forecast(route_id: str, weight_t: float = Query(48, gt=0),
+                storm: bool = False):
+    route = data.get_route(route_id)
+    if route is None:
+        raise HTTPException(404, f"unknown route {route_id}")
+    return ml.predict_delay(route, weight_t, storm)
+
+
+@app.get("/api/ml/shipment/{shipment_id}")
+def ml_shipment(shipment_id: str, storm: bool = False):
+    s = data.get_shipment(shipment_id)
+    if s is None:
+        raise HTTPException(404, f"unknown shipment {shipment_id}")
+    return ml.predict_delay(data.get_route(s["route_id"]), s["weight_t"], storm)
 
 
 # --- frontend ---
