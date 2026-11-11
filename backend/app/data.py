@@ -1,12 +1,29 @@
-"""Demo seed data for Smart Caspian Transit.
+"""Data for Smart Caspian Transit — with REAL sources where we have them.
 
-HONESTY NOTE:
-All numbers are DEMO data for the hackathon prototype. Distances and
-times are rough corridor estimates, weather/congestion are illustrative,
-CO2 and cost factors are published ranges (see README). The delay model
-in model.py is an explainable scoring model, NOT a trained ML model —
-we say so on the demo. Swap this module for real feeds (port APIs,
-weather API, customs API) without touching the API or frontend.
+What is real here (checked 12 Nov 2026):
+- Distances: haversine between ports/nodes from coordinates, x1.1-1.15
+  route factor for sea legs. Makhachkala-Amirabad 844 km straight
+  (NOT 540 as in v0.1 — that was wrong and is fixed here).
+- Weather: live via Open-Meteo marine API (see weather.py); 90-day
+  archive stats baked into archive_weather.json (wave/wind
+  distributions per sea segment, fetched 2026-11-12).
+- Corridor: 21.5M t in 2025; Jan-Sep 2026 rail 8.9M t (+9.6% YoY),
+  trans-Caspian route +19.3%; 2030 forecast 32M t (Government of RF,
+  via RZD / press, Oct 2026). Makhachkala port: 3.5M t in 2025,
+  Jan-Aug 2026 >2.9M t (+42.5%), capacity ~10-11M t by 2030.
+- Ferries: NO fixed timetable on the Caspian — sail when loaded and
+  weather allows; Baku-Turkmenbashi ~17h, Kuryk-Baku <24h; waits of
+  1-2 days are normal, up to a week at congestion (Wikivoyage,
+  GetTransport 2026). Hence sailing_interval_h = 72.
+- CO2 factors: DESNZ 2026 (UK Government), well-to-wheel: rail
+  freight 32.74, RoRo ferry 63.28, articulated HGV 97.49 g/tkm.
+  Our sea legs are RoRo ferries — hence sea = 63, not 12.
+- Freight rates: Argus Caspian Transport, Oct 2025: Aktau-Iranian
+  ports $40-45/t, Astrakhan-Iranian ports $63-65/t. Sea rate 0.045
+  $/t-km reproduces ~$42/t for the 930 km Makhachkala-Amirabad leg.
+
+Still demo (no live feed exists in the open): port congestion %,
+customs queues, shipment list. Swap in data.py only.
 """
 from __future__ import annotations
 
@@ -35,16 +52,23 @@ NODES = {
                      "lat": 27.19, "lon": 56.27, "kind": "port_rail"},
 }
 
-# Weather on the Caspian sea legs (demo readings, 12 Nov 2026).
+# Sea-leg midpoints for live weather (Open-Meteo marine API).
+SEA_SEGMENTS = {
+    "caspian_north": {"segment": "Астрахань — Актау", "lat": 45.0, "lon": 49.6},
+    "caspian_west": {"segment": "Махачкала — Амирабад", "lat": 39.9, "lon": 50.4},
+}
+
+# Demo fallback weather (used only when live fetch fails / offline).
 WEATHER = {
     "caspian_north": {"segment": "Астрахань — Актау", "wind_ms": 11, "wave_m": 1.2,
                       "updated": "2026-11-12 06:00"},
     "caspian_west": {"segment": "Махачкала — Амирабад", "wind_ms": 9, "wave_m": 0.9,
                      "updated": "2026-11-12 06:00"},
 }
-STORM = {"wind_ms": 19, "wave_m": 3.4, "label": "Шторм: ветер 19 м/с, волна 3,4 м"}
+STORM = {"wind_ms": 19, "wave_m": 3.4,
+         "label": "Шторм: ветер 19 м/с, волна 3,4 м (экстремум — за 90 дней макс. волна 2,52 м)"}
 
-# Port congestion (0-100%) and customs queue, demo snapshot.
+# Port congestion (0-100%) and customs queue — demo snapshot.
 PORTS = {
     "astrakhan": {"node": "astrakhan", "congestion_pct": 62, "customs_queue_h": 9},
     "makhachkala": {"node": "makhachkala", "congestion_pct": 45, "customs_queue_h": 6},
@@ -54,10 +78,20 @@ PORTS = {
     "enzeli": {"node": "enzeli", "congestion_pct": 30, "customs_queue_h": 4},
 }
 
-# Emission factors, g CO2 per tonne-km (published ranges, estimates).
-CO2_G_PER_TKM = {"rail": 22, "sea": 12, "road": 62}
-# Cost, USD per tonne-km (rough corridor estimates).
-COST_USD_PER_TKM = {"rail": 0.055, "sea": 0.028, "road": 0.12}
+# CO2, g per tonne-km (DESNZ 2026, well-to-wheel).
+CO2_G_PER_TKM = {"rail": 33, "sea": 63, "road": 97}
+# Cost, USD per tonne-km (estimates; sea calibrated to Argus Oct 2025).
+COST_USD_PER_TKM = {"rail": 0.04, "sea": 0.045, "road": 0.12}
+
+# Real corridor numbers for the pitch (sources in README).
+CORRIDOR_STATS = [
+    {"value": "21,5 млн т", "label": "грузопоток МТК «Север–Юг» в 2025 году"},
+    {"value": "+19,3%", "label": "транскаспийский маршрут, янв–сен 2026 к 2025"},
+    {"value": "8,9 млн т", "label": "ж/д перевозки по коридору, янв–сен 2026 (+9,6%)"},
+    {"value": "15–20 дней", "label": "доставка Россия–Иран вместо 35–45 через Суэц"},
+    {"value": "32 млн т", "label": "прогноз грузопотока коридора к 2030 году"},
+    {"value": "+42,5%", "label": "порт Махачкала, янв–авг 2026 (2,9 млн т)"},
+]
 
 ROUTES = [
     {
@@ -67,10 +101,10 @@ ROUTES = [
             {"id": "R1-L1", "mode": "rail", "from": "moscow", "to": "makhachkala",
              "distance_km": 1820, "base_h": 40, "port": "makhachkala", "customs_h": 0},
             {"id": "R1-L2", "mode": "sea", "from": "makhachkala", "to": "amirabad",
-             "distance_km": 540, "base_h": 32, "sea": "caspian_west",
-             "sailing_interval_h": 24, "port": "amirabad", "customs_h": 5},
+             "distance_km": 930, "base_h": 50, "sea": "caspian_west",
+             "sailing_interval_h": 72, "port": "amirabad", "customs_h": 5},
             {"id": "R1-L3", "mode": "rail", "from": "amirabad", "to": "bandar_abbas",
-             "distance_km": 1150, "base_h": 28, "port": None, "customs_h": 0},
+             "distance_km": 1300, "base_h": 32, "port": None, "customs_h": 0},
         ],
     },
     {
@@ -80,10 +114,10 @@ ROUTES = [
             {"id": "R2-L1", "mode": "rail", "from": "moscow", "to": "astrakhan",
              "distance_km": 1280, "base_h": 30, "port": "astrakhan", "customs_h": 0},
             {"id": "R2-L2", "mode": "sea", "from": "astrakhan", "to": "aktau",
-             "distance_km": 460, "base_h": 28, "sea": "caspian_north",
-             "sailing_interval_h": 24, "port": "aktau", "customs_h": 11},
+             "distance_km": 445, "base_h": 26, "sea": "caspian_north",
+             "sailing_interval_h": 72, "port": "aktau", "customs_h": 11},
             {"id": "R2-L3", "mode": "rail", "from": "aktau", "to": "bandar_abbas",
-             "distance_km": 1750, "base_h": 44, "port": None, "customs_h": 4},
+             "distance_km": 2100, "base_h": 52, "port": None, "customs_h": 4},
         ],
     },
     {
@@ -93,9 +127,9 @@ ROUTES = [
             {"id": "R3-L1", "mode": "rail", "from": "moscow", "to": "baku",
              "distance_km": 2200, "base_h": 52, "port": "baku", "customs_h": 0},
             {"id": "R3-L2", "mode": "rail", "from": "baku", "to": "astara",
-             "distance_km": 320, "base_h": 9, "port": None, "customs_h": 7},
+             "distance_km": 300, "base_h": 8, "port": None, "customs_h": 7},
             {"id": "R3-L3", "mode": "rail", "from": "astara", "to": "bandar_abbas",
-             "distance_km": 1350, "base_h": 34, "port": None, "customs_h": 0},
+             "distance_km": 1500, "base_h": 36, "port": None, "customs_h": 0},
         ],
     },
 ]

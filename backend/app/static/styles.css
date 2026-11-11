@@ -28,6 +28,18 @@ table.routes th, table.routes td { text-align:left; padding:8px; border-bottom:1
 .pill.medium { background:#fdf1d7; color:var(--warn); }
 .pill.high { background:#fbe4e1; color:var(--bad); }
 select { padding:8px; border-radius:8px; border:1px solid #cbd6de; font-size:15px; width:100%; margin-bottom:10px; }
+input[type="number"] { padding:8px; border-radius:8px; border:1px solid #cbd6de; font-size:15px; width:110px; }
+.stats { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+.stat { background:#f0f7fa; border-radius:10px; padding:12px; }
+.stat b { display:block; font-size:20px; color:var(--sea); }
+.stat span { color:var(--mut); font-size:13px; }
+.ports-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap:12px; }
+.port-card { background:#f8fafb; border-radius:10px; padding:12px; }
+.port-card b { font-size:15px; }
+.bar { height:8px; background:#e6edf1; border-radius:99px; margin:8px 0 4px; overflow:hidden; }
+.bar i { display:block; height:100%; background:var(--sea); border-radius:99px; }
+.bar i.hot { background:var(--bad); }
+.bar i.warm { background:var(--warn); }
 .timeline { list-style:none; margin:10px 0; padding:0; }
 .timeline li { padding:10px 0 10px 14px; border-left:3px solid var(--sea); margin-left:4px; position:relative; }
 .timeline li.bottleneck { border-left-color:var(--bad); background:#fdf6f5; border-radius:0 8px 8px 0; padding-right:8px; }

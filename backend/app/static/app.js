@@ -101,9 +101,50 @@ async function loadLedger() {
     : `<li class="hint">Пока пусто — отправьте груз на pre-clearance.</li>`;
 }
 
+async function loadCorridor() {
+  const data = await getJSON("/api/corridor");
+  $("#corridor-stats").innerHTML = data.stats.map((s) =>
+    `<div class="stat"><b>${s.value}</b><span>${s.label}</span></div>`).join("");
+}
+
+async function loadPorts() {
+  const data = await getJSON("/api/ports");
+  $("#ports-grid").innerHTML = data.ports.map((p) => {
+    const cls = p.congestion_pct >= 60 ? "hot" : p.congestion_pct >= 45 ? "warm" : "";
+    return `<div class="port-card"><b>${p.name}</b><br>
+      <span class="hint">загруженность ${p.congestion_pct}% · таможня ~${p.customs_queue_h} ч</span>
+      <div class="bar"><i class="${cls}" style="width:${p.congestion_pct}%"></i></div></div>`;
+  }).join("");
+}
+
+async function loadLiveWeather() {
+  try {
+    const data = await getJSON("/api/weather/live");
+    const parts = Object.values(data.segments).map((s) =>
+      `${s.segment}: волна ${s.wave_m} м, ветер ${s.wind_ms} м/с`).join(" · ");
+    $("#live-badge").textContent = data.live
+      ? `🌊 LIVE Open-Meteo: ${parts}`
+      : `🌊 Погода: демо (live недоступен): ${parts}`;
+  } catch (e) {
+    $("#live-badge").textContent = "🌊 Погода: демо";
+  }
+}
+
+async function runQuote() {
+  const routeId = $("#quote-route").value;
+  const weight = Math.max(1, +$("#quote-weight").value || 48);
+  const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}`);
+  const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}`);
+  $("#quote-result").textContent =
+    `${fc.route_name}: ${fc.total_predicted_h} ч вместо ${fc.total_base_h} ч ` +
+    `(+${fc.delay_h} ч, риск срыва ${Math.round(fc.delay_probability * 100)}%). ` +
+    `ML-прогноз: +${mlp.ml_delay_h} ч. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
+    `стоимость ~$${fc.cost_usd.toLocaleString("ru-RU")}. ${fc.recommendation}`;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await Promise.all([initMap(), loadCompare(), loadShipments()]);
+    await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather()]);
   } catch (e) {
     console.error(e);
     $("#verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
@@ -121,6 +162,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentShipment = e.target.value;
     loadShipment();
   });
+  $("#quote-btn").addEventListener("click", runQuote);
   $("#clearance-btn").addEventListener("click", async () => {
     const s = shipments.find((x) => x.id === currentShipment);
     const res = await getJSON("/api/clearance/submit", {

@@ -22,7 +22,8 @@ def test_forecast_base_math():
     r = client.get("/api/routes/R1/forecast?weight_t=48")
     assert r.status_code == 200
     body = r.json()
-    assert body["total_base_h"] == 100
+    # R1: 40 (rail) + 50 (sea, 930 km) + 32 (rail) = 122
+    assert body["total_base_h"] == 122
     assert body["total_predicted_h"] > body["total_base_h"]
     assert body["bottleneck_leg_id"] in ("R1-L1", "R1-L2", "R1-L3")
     assert body["co2_kg"] > 0 and body["cost_usd"] > 0
@@ -67,6 +68,19 @@ def test_clearance_missing_docs_then_fixed():
     assert len(ledger["entries"]) == 2
     assert ledger["chain_valid"] is True
     assert ledger["entries"][1]["prev_hash"] == ledger["entries"][0]["hash"]
+
+
+def test_live_weather_and_corridor():
+    r = client.get("/api/weather/live")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body["segments"]) == {"caspian_north", "caspian_west"}
+    for seg in body["segments"].values():
+        assert seg["wave_m"] >= 0 and seg["wind_ms"] >= 0
+        assert seg["source"].startswith(("live:", "demo"))
+    stats = client.get("/api/corridor").json()["stats"]
+    assert len(stats) == 6
+    assert any("21,5" in s["value"] for s in stats)
 
 
 def test_ml_info_and_forecast():

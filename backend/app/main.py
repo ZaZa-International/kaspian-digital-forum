@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import data, ml, model
+from app import data, ml, model, weather
 
 app = FastAPI(
     title="Smart Caspian Transit",
@@ -49,8 +49,19 @@ def ports():
 
 
 @app.get("/api/weather")
-def weather():
+def weather_snapshot():
     return {"sea": data.WEATHER, "storm_scenario": data.STORM}
+
+
+@app.get("/api/weather/live")
+def weather_live():
+    """Live wave/wind from Open-Meteo (cached 30 min), demo fallback offline."""
+    return weather.get_live_weather()
+
+
+@app.get("/api/corridor")
+def corridor():
+    return {"stats": data.CORRIDOR_STATS}
 
 
 @app.get("/api/routes")

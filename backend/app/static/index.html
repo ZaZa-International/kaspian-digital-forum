@@ -25,17 +25,46 @@
   </section>
 
   <section class="card">
+    <h2>Коридор в цифрах — реальные данные</h2>
+    <div class="stats" id="corridor-stats"></div>
+    <p class="hint">Источники: РЖД / Правительство РФ (окт 2026), Росморречфлот, АСОП. Подробнее — в README.</p>
+  </section>
+
+  <section class="card">
     <h2>Карта коридора и сравнение маршрутов</h2>
     <div class="storm-row">
       <button id="storm-btn" class="storm-btn">🌩 Шторм на Каспии: выкл</button>
       <span class="hint" id="storm-note">Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.</span>
+      <span class="hint" id="live-badge">Погода: загружается…</span>
     </div>
     <div id="map"></div>
     <table class="routes" id="compare-table">
       <thead><tr><th>Маршрут</th><th>Время в пути</th><th>Задержка</th><th>Риск срыва</th><th>CO₂</th><th>Стоимость*</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="hint">* Оценка по ставкам $/т-км (ж/д 0,055 · море 0,028 · авто 0,12). CO₂: ж/д 22 · море 12 · авто 62 г/т-км.</p>
+    <p class="hint">* Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025: Актау–иранские порты $40–45/т). CO₂ по DESNZ 2026: ж/д 33 · паром RoRo 63 · авто 97 г/т-км.</p>
+  </section>
+
+  <section class="card">
+    <h2>🧮 Рассчитать свой груз</h2>
+    <div class="sim-controls">
+      <label>Маршрут:
+        <select id="quote-route">
+          <option value="R1">R1 — Западный (Махачкала–Амирабад)</option>
+          <option value="R2">R2 — Восточный (Астрахань–Актау)</option>
+          <option value="R3">R3 — Сухопутный (Баку–Астара)</option>
+        </select>
+      </label>
+      <label>Вес, тонн: <input type="number" id="quote-weight" min="1" max="5000" value="48"></label>
+      <button id="quote-btn" class="primary">Рассчитать</button>
+    </div>
+    <p class="verdict" id="quote-result">Выберите маршрут и вес — покажем время, задержку, ML-прогноз, CO₂ и стоимость.</p>
+  </section>
+
+  <section class="card">
+    <h2>Порты: загруженность и таможня</h2>
+    <div class="ports-grid" id="ports-grid"></div>
+    <p class="hint">Загруженность и очереди — демо-снимок; погода на море — живая (Open-Meteo). Паромы Каспия ходят без фиксированного расписания: ожидание 1–2 дня — норма, до недели при заторах.</p>
   </section>
 
   <section class="grid">
@@ -62,9 +91,10 @@
     <h2>Откуда факторы модели</h2>
     <ul class="sources">
       <li>Узлы коридора — порты Астрахань, Махачкала, Актау, Баку, Амирабад, Энзели (из текста кейса №2).</li>
-      <li>Морское плечо останавливается при волне ≥ 2 м — правило demo-модели, на защите озвучивается как допущение.</li>
-      <li>CO₂-факторы — опубликованные диапазоны для видов транспорта (ж/д ~14–25, море ~8–15, авто ~60–100 г/т-км).</li>
-      <li>Погода, загруженность портов и очереди на таможне в прототипе — демо-снимок, а не live-данные.</li>
+      <li>Погода на море — <b>живая</b> (Open-Meteo marine API, кэш 30 мин); архив 90 дней — в <code>archive_weather.json</code>, на нём дообучена ML-модель.</li>
+      <li>Паромы Каспия без расписания: рейс Баку–Туркменбаши ~17 ч, Курык–Баку &lt;24 ч, ожидание 1–2 дня — норма (Wikivoyage, GetTransport 2026).</li>
+      <li>CO₂ — DESNZ 2026: ж/д 33, паром RoRo 63, фура 97 г/т-км. Ставки моря — Argus, окт 2025.</li>
+      <li>Загруженность портов и очереди на таможне — демо-снимок, а не live-данные.</li>
     </ul>
   </section>
 </main>

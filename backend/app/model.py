@@ -11,16 +11,13 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
-from app import data
+from app import data, weather
 
 MODE_RU = {"rail": "ж/д", "sea": "море", "road": "авто"}
 
 
 def _weather(sea: str, storm: bool) -> dict:
-    if storm:
-        return {"wind_ms": data.STORM["wind_ms"], "wave_m": data.STORM["wave_m"]}
-    w = data.WEATHER[sea]
-    return {"wind_ms": w["wind_ms"], "wave_m": w["wave_m"]}
+    return weather.current_sea_state(sea, storm)
 
 
 def predict_leg(leg: dict, storm: bool) -> dict:
@@ -48,10 +45,13 @@ def predict_leg(leg: dict, storm: bool) -> dict:
             delay += 6
             reasons.append(f"ветер {w['wind_ms']} м/с → +6 ч")
         if w["wave_m"] >= 2.0:
-            delay += leg.get("sailing_interval_h", 24)
+            # No fixed timetable on the Caspian: ferries sail when loaded
+            # and weather allows; waits of 1-2 days are normal, up to a
+            # week at congestion. We charge a conservative +48h.
+            delay += 48
             reasons.append(
-                f"волна ≥ 2 м — паром не выходит по расписанию, "
-                f"следующий рейс +{leg.get('sailing_interval_h', 24)} ч"
+                "волна ≥ 2 м — паром не выходит, следующий рейс не раньше "
+                "чем через ~48 ч (расписания у каспийских паромов нет)"
             )
     elif mode == "rail":
         delay += 1.5
