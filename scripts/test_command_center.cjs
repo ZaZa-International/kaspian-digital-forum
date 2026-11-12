@@ -86,17 +86,29 @@ async function main() {
   );
   await page.screenshot({ path: path.join(output, "desktop-hero.png") });
   await page.evaluate(() => scrollTo({ top: 600, behavior: "instant" }));
-  await page.waitForTimeout(800);
-  assert.equal(await page.locator("#story-copy").isVisible(), true);
-  assert.ok(
-    Number(
-      await page
-        .locator("#hero-copy")
-        .evaluate((el) => getComputedStyle(el).opacity),
-    ) < 0.02,
+  await until(
+    () =>
+      page
+        .locator("#freight-video")
+        .evaluate((video) => video.currentTime > 0.2),
+    "freight video follows scroll",
   );
-  pass("scroll story chapters do not overlap");
-  await page.screenshot({ path: path.join(output, "desktop-story-storm.png") });
+  assert.equal(
+    await page.locator("#freight-video").evaluate((video) => video.paused),
+    true,
+  );
+  await page.screenshot({
+    path: path.join(output, "desktop-freight-handling.png"),
+  });
+  await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
+  await until(
+    () =>
+      page
+        .locator("#freight-video")
+        .evaluate((video) => video.currentTime < 0.05),
+    "freight video reverses",
+  );
+  pass("freight video scrubs forward and backward without autoplay");
   await page
     .locator("#operations")
     .evaluate((el) =>

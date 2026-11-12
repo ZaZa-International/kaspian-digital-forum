@@ -1,10 +1,15 @@
 /* Cache static presentation only. Cargo, tokens and API responses never enter this cache. */
-const CACHE = "sct-static-v7";
+const CACHE = "sct-static-v8";
 const ASSETS = [
   "/",
   "/static/laboratory.html",
   "/static/command.css",
   "/static/command.js",
+  "/static/freight-hero.css",
+  "/static/freight-hero.js",
+  "/static/assets/freight/freight-poster.jpg",
+  "/static/assets/freight/freight-720.mp4",
+  "/static/assets/freight/oswald.ttf",
   "/static/caspian-scene.js",
   "/static/styles.css",
   "/static/app.js",
@@ -12,6 +17,7 @@ const ASSETS = [
   "/static/icon-192.png",
   "/static/icon-512.png",
   "/static/assets/brand/mark.svg",
+  "/static/assets/brand/mark-mono.svg",
   "/static/assets/geo/borders.json",
   "/static/assets/geo/caspian.json",
   "/static/vendor/gsap/gsap.min.js",
@@ -65,7 +71,8 @@ self.addEventListener("fetch", (e) => {
     (async () => {
       try {
         const response = await fetch(e.request);
-        if (response.ok) {
+        // Range responses for video are partial, and Cache.put rejects status 206.
+        if (response.status === 200) {
           const copy = response.clone();
           e.waitUntil(caches.open(CACHE).then((c) => c.put(e.request, copy)));
         }

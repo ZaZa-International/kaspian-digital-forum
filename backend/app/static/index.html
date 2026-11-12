@@ -20,16 +20,18 @@
     <link rel="manifest" href="/static/manifest.json" />
     <link rel="stylesheet" href="/static/vendor/fonts.css" />
     <link rel="stylesheet" href="/static/command.css" />
+    <link rel="stylesheet" href="/static/freight-hero.css" />
     <script defer src="/static/vendor/gsap/gsap.min.js"></script>
     <script defer src="/static/vendor/gsap/ScrollTrigger.min.js"></script>
     <script type="module" src="/static/command.js"></script>
+    <script type="module" src="/static/freight-hero.js"></script>
   </head>
   <body>
     <a class="skip" href="#operations">К управлению перевозками</a>
-    <header class="nav">
+    <header class="nav freight-nav">
       <a class="brand" href="#"
         ><img
-          src="/static/assets/brand/mark.svg"
+          src="/static/assets/brand/mark-mono.svg"
           width="36"
           height="36"
           alt=""
@@ -49,9 +51,124 @@
     </header>
     <main>
       <section
-        class="journey"
+        id="freight-track"
+        class="freight-track"
+        aria-label="Как устроена платформа"
+      >
+        <div class="freight-scene">
+          <div class="freight-media" aria-hidden="true">
+            <img
+              class="freight-frame freight-poster"
+              src="/static/assets/freight/freight-poster.jpg"
+              width="1920"
+              height="1080"
+              alt=""
+              fetchpriority="high"
+            />
+            <video
+              id="freight-video"
+              class="freight-frame freight-video"
+              data-src="/static/assets/freight/freight-720.mp4"
+              data-src-wide="/static/assets/freight/freight-1080.mp4"
+              poster="/static/assets/freight/freight-poster.jpg"
+              preload="none"
+              muted
+              playsinline
+              disablepictureinpicture
+              disableremoteplayback
+            ></video>
+            <div class="freight-letter-window">
+              <span class="freight-letters">ВОЗМОЖНОСТИ</span>
+            </div>
+          </div>
+          <div class="freight-floor">
+            <div class="freight-mobile-lead-slot"></div>
+            <div class="freight-scene-links">
+              <span class="freight-stage-label"
+                >СЕВЕР — ЮГ / КАСПИЙСКИЙ КОРИДОР</span
+              >
+              <span class="freight-scroll-cue" aria-hidden="true"
+                >ПРОКРУТИТЕ <b>↓</b></span
+              >
+              <a href="#journey">К 3D-карте <span>↗</span></a>
+              <a href="#operations">Открыть пульт <span>↗</span></a>
+            </div>
+            <div class="freight-strip-slot"></div>
+          </div>
+        </div>
+      </section>
+      <section
+        class="freight-services"
+        id="freight-services"
+        aria-labelledby="freight-title"
+      >
+        <div class="freight-strip" id="freight-strip">
+          <div class="freight-lead">
+            <h1 id="freight-title">
+              <span>Всё для груза.</span><span>Под контролем.</span
+              ><em>В одном окне.</em>
+            </h1>
+            <p>
+              Прогнозируйте задержки, сравнивайте маршруты и сохраняйте решения
+              по перевозкам через Каспий.
+            </p>
+          </div>
+          <article class="freight-card">
+            <svg aria-hidden="true" viewBox="0 0 32 32">
+              <path d="M3 25h26M5 21l7-8 6 4 9-12M21 5h6v6" />
+            </svg>
+            <h2>Прогноз задержек</h2>
+            <p>
+              Смотрите, где погода и ожидание парома сдвигают расчётное время
+              прибытия.
+            </p>
+          </article>
+          <article class="freight-card">
+            <svg aria-hidden="true" viewBox="0 0 32 32">
+              <path
+                d="M6 26h7a5 5 0 0 0 0-10h-2a5 5 0 0 1 0-10h14m-5-5 5 5-5 5"
+              />
+              <circle cx="6" cy="26" r="2" />
+            </svg>
+            <h2>Маршруты</h2>
+            <p>
+              Сравнивайте доступные альтернативы от текущего узла с сохранением
+              пройденных плеч.
+            </p>
+          </article>
+          <article class="freight-card">
+            <svg aria-hidden="true" viewBox="0 0 32 32">
+              <path d="M5 27h22M8 23v-6m8 6V11m8 12V5" />
+            </svg>
+            <h2>Экономика</h2>
+            <p>
+              Учитывайте свои ставки простоя, штрафы за опоздание и расходы на
+              перегрузку.
+            </p>
+          </article>
+          <article class="freight-card">
+            <svg aria-hidden="true" viewBox="0 0 32 32">
+              <path d="M8 3h11l5 5v21H8zM18 3v6h6M12 15h8m-8 5h8m-8 5h5" />
+            </svg>
+            <h2>Документы</h2>
+            <p>Проверяйте комплект документов и расхождения в данных груза.</p>
+          </article>
+          <article class="freight-card">
+            <svg aria-hidden="true" viewBox="0 0 32 32">
+              <path d="M16 4a12 12 0 1 1-10 5m0-5v6h6m4 0v7l5 3" />
+            </svg>
+            <h2>История решений</h2>
+            <p>
+              Подтверждайте новый план и возвращайтесь к сохранённым версиям
+              перевозки.
+            </p>
+          </article>
+        </div>
+      </section>
+      <section
+        class="journey atlas-section"
         id="journey"
-        aria-label="Интерактивная история маршрута"
+        aria-label="Трёхмерная карта маршрутов"
       >
         <div class="world-stage">
           <div class="hero-topline">
@@ -65,7 +182,7 @@
           ></div>
           <div class="hero-copy" id="hero-copy">
             <div class="eyebrow">ЛОГИСТИКА. НА ШАГ ВПЕРЕДИ.</div>
-            <h1>Каспий.<br />Движение<br /><em>под контролем.</em></h1>
+            <h2>Каспий.<br />Один коридор.<br /><em>Много решений.</em></h2>
             <p>Видеть риск до задержки.<br />Найти маршрут. Сохранить время.</p>
             <div class="hero-actions">
               <a class="button primary" href="#operations"

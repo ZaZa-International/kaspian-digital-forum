@@ -850,6 +850,8 @@ async function closeDemo() {
   else await refresh();
 }
 function storyMotion() {
+  // Freight Services owns the scroll narrative; the geographic atlas stays interactive.
+  if (document.querySelector(".atlas-section")) return;
   if (!window.gsap || !window.ScrollTrigger) return;
   gsap.registerPlugin(ScrollTrigger);
   const mm = gsap.matchMedia();

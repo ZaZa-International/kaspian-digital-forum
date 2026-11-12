@@ -40,3 +40,7 @@ Three.js r180 — MIT, лицензия в `backend/app/static/vendor/three/LICE
 ## Контекст документации
 
 Context7 использован для GSAP ScrollTrigger/matchMedia, Three.js и pypdf 7 (контекст `apply_configuration`). MotionSites: прочитана библиотека, сравнены девять направлений, получены бесплатные Freight Scroll Hero и Medusa Jellyfish Hero. Референсы определили композицию и работу камеры; код географической сцены написан для этого проекта.
+
+## Выбор пользователя: Freight Services Hero
+
+После просмотра карточек пользователь выбрал [Freight Services Hero](https://motionsites.ai/?prompt=freight-services-hero). Получен третий бесплатный prompt. Из его media-раздела локально сохранены клип и постер; платный HTML и платная генерация не использованы. Светлая видеосцена и тёмная лента возможностей стали входом на сайт, исходный интерактивный атлас перенесён следом. Oswald использован вместо латинского Anton для кириллицы; файл OFL хранится рядом со шрифтом.
