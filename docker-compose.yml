@@ -4,7 +4,11 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - sct-data:/app/backend/app/data
+      # v2: fresh volume initialized from the image dir (owned by appuser).
+      # The old sct-data volume was created root-owned by a pre-nonroot image
+      # and forced the store into the /tmp fallback (no persistence across
+      # container recreation). Old volume is left untouched on the host.
+      - sct-data-v2:/app/backend/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)"]
@@ -14,4 +18,4 @@ services:
       start_period: 20s
 
 volumes:
-  sct-data:
+  sct-data-v2:

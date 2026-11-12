@@ -91,10 +91,11 @@ PWA (service worker, manifest, офлайн-режим). Docker (non-root, volum
 ./run.sh                 # http://localhost:8000 — нужен Python 3.12
                          # (пины scikit-learn/numpy проверены на 3.12)
 # или
-docker compose up        # http://localhost:8000, volume sct-data,
+docker compose up        # http://localhost:8000, volume sct-data-v2,
                          # non-root, healthcheck /api/health
 
-# тесты (82, герметичные: live-погода замокана, seed фиксирован)
+# тесты (119 с DLT-зависимостями, герметичные: live-погода замокана, seed фиксирован;
+# без web3/eth-tester — 112 passed + 1 skip, anchor-тесты пропускаются)
 cd backend && python -m pytest -q
 
 # сброс пользовательского демо-состояния (seed-грузы остаются)
@@ -107,16 +108,21 @@ API-документация: http://localhost:8000/docs
 ### Эксплуатация (важно для деплоя)
 
 - Runtime-состояние — SQLite в `backend/app/data/sct.db` (в Docker — volume
-  `sct-data`). Процесс работает от non-root (uid 1000). **Если том был создан
-  старым образом и принадлежит root**, запись невозможна: приложение честно
-  покажет `store.ok=false` в `/api/health` и временно перейдёт на fallback
-  `/tmp/sct-data` (с маркировкой `fallback:true`; персистентность при
-  пересоздании контейнера не гарантируется). Постоянный фикс на сервере:
+  `sct-data-v2`). Процесс работает от non-root (uid 1000). Том `sct-data-v2`
+  создаётся из каталога образа, принадлежащего appuser, поэтому доступен на
+  запись (старый том `sct-data` был создан root'ом прежним образом и вызывал
+  fallback; он не используется и остаётся на хосте нетронутым).
+  **Если том всё же недоступен на запись**, приложение честно
+  покажет `store.ok=false`/`fallback:true` в `/api/health` и временно перейдёт
+  на fallback `/tmp/sct-data` (персистентность при пересоздании контейнера не
+  гарантируется). Постоянный фикс на сервере:
   ```bash
   docker exec -u root <container> chown -R 1000:1000 /app/backend/app/data
   docker restart <container>
-  # или пересоздать том: docker compose down && docker volume rm <project>_sct-data && docker compose up -d
   ```
+- Образ включает DLT-зависимости (`requirements-dlt.txt`: web3 + eth-tester[py-evm]),
+  поэтому DLT-якорь реестра работает live на локальном EVM devnet (не mainnet).
+  Без этих пакетов приложение работает, якорь честно деградирует до hash-chain.
 - `/api/health` показывает статус store (ok/degraded, путь, ошибка) —
   используйте для мониторинга после деплоя.
 - Каталог данных можно переопределить: `SCT_DATA_DIR=/path/to/writable`.
@@ -197,7 +203,7 @@ API-документация: http://localhost:8000/docs
 - **Persistence** — SQLite WAL (`store.py`): транзакции (BEGIN IMMEDIATE),
   монотонные ID (counter, не переиспользуются), идемпотентность
   (`Idempotency-Key`), миграция legacy JSON, concurrent-safe запись,
-  атомарное добавление в hash-chain. Docker volume `sct-data`.
+  атомарное добавление в hash-chain. Docker volume `sct-data-v2`.
 - **Безопасность** — escaping всех динамических вставок в UI (XSS закрыт),
   валидация диапазонов (волна 0–15 м, ветер 0–60 м/с, таможня 0–168 ч,
   вес 0–5000 т, неизвестные узлы → 422), опциональный `SCT_WRITE_TOKEN`,
@@ -279,8 +285,9 @@ API-документация: http://localhost:8000/docs
 │   │   └── static/            # index.html, styles.css, app.js, sw.js,
 │   │       │                  # manifest.json, иконки 192/512 (PWA)
 │   │       └── vendor/        # Leaflet + fonts.css/woff2 локально
-│   └── tests/                 # 82 теста: api, routing, scenarios, clearance,
-│                              # store, security, ml, events, co2, weather
+│   └── tests/                 # 119 тестов: api, routing, scenarios, clearance,
+│                              # store, security, ml, events, co2, weather,
+│                              # docking, ports_live, anchor, manhattan
 └── docs/
     ├── cases.md               # транскрипция обоих кейсов
     ├── RESEARCH.md            # верифицированное исследование источников

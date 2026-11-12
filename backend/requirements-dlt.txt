@@ -4,5 +4,7 @@
 #   pip install -r requirements-dlt.txt
 # Uses a local in-process EVM (py-evm) — no external RPC, no faucet, no mainnet.
 web3>=7.0
-eth-tester[py-evm]>=0.11
+# eth-tester publishes only beta releases (0.11.0b1+); the explicit pre-release
+# pin lets pip resolve it without --pre. Verified: web3 8.0.0 + py-evm backend.
+eth-tester[py-evm]>=0.11.0b1
 eth-account>=0.13
