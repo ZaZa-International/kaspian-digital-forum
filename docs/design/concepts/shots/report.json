@@ -1,0 +1,80 @@
+[
+  {
+    "file": "atlas.png",
+    "target": "/Users/thefuckingdrugdilla/Documents/ChatGPT/magahack/docs/design/concepts/atlas.html",
+    "name": "Ночной диспетчерский атлас",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "thumb": true,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "hydro.png",
+    "target": "/Users/thefuckingdrugdilla/Documents/ChatGPT/magahack/docs/design/concepts/hydro.html",
+    "name": "Гидрографическая карта",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "thumb": true,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "editorial.png",
+    "target": "/Users/thefuckingdrugdilla/Documents/ChatGPT/magahack/docs/design/concepts/editorial.html",
+    "name": "Маршрутный журнал",
+    "state": null,
+    "size": "1440x900",
+    "zoom": 1,
+    "thumb": true,
+    "animationWaitMs": 0,
+    "issues": [],
+    "lint": []
+  },
+  {
+    "file": "sheet.png",
+    "width": 2000,
+    "height": 480,
+    "columns": 3,
+    "items": [
+      {
+        "naturalWidth": 720,
+        "naturalHeight": 450,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 24,
+        "y": 24,
+        "label": "Ночной диспетчерский атлас",
+        "labelY": 432
+      },
+      {
+        "naturalWidth": 720,
+        "naturalHeight": 450,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 680,
+        "y": 24,
+        "label": "Гидрографическая карта",
+        "labelY": 432
+      },
+      {
+        "naturalWidth": 720,
+        "naturalHeight": 450,
+        "width": 640,
+        "height": 400,
+        "labelHeight": 32,
+        "x": 1336,
+        "y": 24,
+        "label": "Маршрутный журнал",
+        "labelY": 432
+      }
+    ],
+    "issues": []
+  }
+]

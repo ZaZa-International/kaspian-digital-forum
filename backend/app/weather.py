@@ -10,12 +10,17 @@ dependency. Never raise: this module must not break the demo.
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock, Thread
 
 from app import data
+
+log = logging.getLogger("sct.weather")
 
 ARCHIVE_PATH = Path(__file__).parent / "archive_weather.json"
 _archive: dict | None = None
@@ -110,3 +115,72 @@ def current_sea_state(sea: str, storm: bool) -> dict:
     w = data.WEATHER[sea]
     return {"wind_ms": w["wind_ms"], "wave_m": w["wave_m"],
             "source": "demo fallback (live unavailable)"}
+
+
+_forecast_lock = Lock()
+_forecast_cache: dict = {"at": 0.0, "payload": None, "refreshing": False}
+
+
+def _hourly_field(host: str, path: str, lat: float, lon: float, field: str) -> dict:
+    url = (
+        f"https://{host}.open-meteo.com/v1/{path}?latitude={lat}&longitude={lon}"
+        f"&hourly={field}&forecast_days=4&timezone=UTC"
+    )
+    if field == "wind_speed_10m":
+        url += "&wind_speed_unit=ms"
+    try:
+        with urllib.request.urlopen(url, timeout=4) as response:
+            hourly = json.load(response)["hourly"]
+        return {
+            datetime.fromisoformat(ts).replace(tzinfo=timezone.utc): value
+            for ts, value in zip(hourly["time"], hourly[field])
+            if isinstance(value, (int, float)) and 0 <= value < 100
+        }
+    except (OSError, ValueError, TypeError, KeyError):
+        return {}
+
+
+def _fetch_forecast() -> dict:
+    segments = {}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        pending = {
+            key: (
+                pool.submit(_hourly_field, "marine-api", "marine", seg["lat"], seg["lon"], "wave_height"),
+                pool.submit(_hourly_field, "api", "forecast", seg["lat"], seg["lon"], "wind_speed_10m"),
+            )
+            for key, seg in data.SEA_SEGMENTS.items()
+        }
+        for key, (marine, forecast) in pending.items():
+            waves, winds = marine.result(), forecast.result()
+            segments[key] = {
+                ts: {"wave_m": round(waves[ts], 2), "wind_ms": round(winds[ts], 1)}
+                for ts in sorted(waves.keys() & winds.keys())
+            }
+    return segments
+
+
+def _refresh_forecast() -> None:
+    payload = None
+    try:
+        payload = _fetch_forecast()
+    except Exception:
+        log.warning("Open-Meteo hourly forecast refresh failed", exc_info=True)
+    finally:
+        with _forecast_lock:
+            _forecast_cache.update(at=time.monotonic(), payload=payload, refreshing=False)
+
+
+def cached_hourly_forecast() -> dict:
+    """Read immediately; refresh external forecast in the background."""
+    with _forecast_lock:
+        now = time.monotonic()
+        age = now - _forecast_cache["at"]
+        payload = _forecast_cache["payload"]
+        ttl = CACHE_TTL_S if payload and any(payload.values()) else 120
+        if not _forecast_cache["refreshing"] and (not _forecast_cache["at"] or age >= ttl):
+            _forecast_cache["refreshing"] = True
+            Thread(target=_refresh_forecast, daemon=True, name="sct-weather").start()
+        return {
+            "status": "loading" if _forecast_cache["refreshing"] else "unavailable",
+            "segments": payload if payload and age < CACHE_TTL_S else {},
+        }

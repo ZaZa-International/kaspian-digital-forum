@@ -142,7 +142,7 @@ function renderGauge(ex) {
   const thr = ex.train_p95 / scaleMax * 100, pos = Math.min(100, ex.l1_to_median / scaleMax * 100);
   const chip = ex.is_extrapolating
     ? `<span class="chip chip-danger">${icon("alert")}редкая ситуация — осторожно</span>`
-    : `<span class="chip chip-ok">${icon("check")}модель уверена</span>`;
+    : `<span class="chip chip-ok">${icon("check")}условия знакомы модели</span>`;
   const note = ex.is_extrapolating
     ? 'Маркер в красной зоне: шторм — редкая ситуация, модель такого почти не видела при обучении. Верьте объяснимому расчёту по правилам, а не ML-цифре.'
     : 'Маркер в зелёной зоне: такая погода и загрузка часто встречались при обучении — прогнозу модели можно верить.';

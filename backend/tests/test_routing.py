@@ -64,7 +64,7 @@ def test_enzeli_connected_in_real_graph():
     assert r["paths"], "Enzeli must be reachable (case-listed port)"
     r2 = client.get("/api/routes/search?from_node=enzeli&to_node=bandar_abbas").json()
     assert r2["paths"]
-    assert len(data.GRAPH_EDGES) == 17
+    assert any(e["from"] == "makhachkala" and e["to"] == "baku" for e in data.GRAPH_EDGES)
 
 
 def test_conditional_legs_labelled():

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Гидрографический атлас — Smart Caspian Transit</title>
+<link rel="stylesheet" href="fonts.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#e7ece7;color:#173940;font:16px "IBM Plex Sans",sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;padding:24px 38px;border-bottom:1px solid #8ea5a6;font:700 14px "JetBrains Mono",monospace}
+main{padding:24px 38px 38px;display:grid;grid-template-columns:7fr 4fr;gap:16px;min-height:calc(100vh - 70px)}
+figure{margin:0;position:relative;display:grid;place-items:center;background:#d7e3df;border:1px solid #839a9b;min-height:570px}
+figcaption{position:absolute;left:14px;top:14px;background:#e7ece7;border:1px solid #8ea5a6;padding:7px 10px;font:12px "JetBrains Mono",monospace}
+.map{width:min(100%,720px);height:100%;display:grid;place-items:center;--grid:#9eb9b6}
+.map svg{width:100%;height:100%;max-height:590px;overflow:visible}
+.sea{fill:#90b9bf;stroke:#214b54;stroke-width:1.6}
+.route{fill:none;stroke:#a83a25;stroke-width:2.8;stroke-dasharray:6 4}
+.port{fill:#173940;font:10px "JetBrains Mono",monospace}
+.port circle{fill:#e7ece7;stroke:#173940;stroke-width:1.8}
+article{border:1px solid #8ea5a6;display:flex;flex-direction:column;justify-content:space-between;background:#f3f5ef}
+article section{padding:24px 28px 30px}
+h1{font-size:clamp(43px,5.2vw,77px);line-height:.92;letter-spacing:-.06em;margin:24px 0;max-width:8ch}
+p{font-size:18px;line-height:1.55;color:#35565b;max-width:26ch}
+.meta{margin:0;display:grid;grid-template-columns:1fr 1fr;border-block:1px solid #8ea5a6}
+.meta div{padding:13px 17px}
+.meta div+div{border-left:1px solid #8ea5a6}
+dt{font:11px "JetBrains Mono",monospace;color:#35565b}
+dd{margin:5px 0 0;font-weight:700}
+.cta{display:block;text-align:center;background:#173940;color:#f3f5ef;font-weight:700;padding:17px}
+</style>
+</head>
+<body>
+<header><span data-copy="brand"></span><span data-copy="status"></span></header>
+<main>
+  <figure><div class="map" data-map></div><figcaption data-copy="route"></figcaption></figure>
+  <article>
+    <section><span data-copy="status"></span><h1 data-copy="heading"></h1><p data-copy="description"></p></section>
+    <div>
+      <dl class="meta"><div><dt>Отправление</dt><dd data-copy="departure"></dd></div><div><dt>Прибытие</dt><dd data-copy="arrival"></dd></div></dl>
+      <span class="cta" data-copy="action"></span>
+    </div>
+  </article>
+</main>
+<script src="shared.js"></script>
+</body>
+</html>

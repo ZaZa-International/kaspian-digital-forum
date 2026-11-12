@@ -9,8 +9,14 @@ for cand in python3.12 python3; do
   if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
 done
 if [ -z "$PY" ]; then echo "Python not found. Install Python 3.12." >&2; exit 1; fi
-if [ ! -d .venv ]; then
-  "$PY" -m venv .venv
-  .venv/bin/pip install -q -r requirements.txt
+if [ -x ../.venv/bin/python ]; then
+  SCT_VENV=../.venv
+else
+  SCT_VENV=.venv
 fi
-exec .venv/bin/uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+if [ ! -x "$SCT_VENV/bin/python" ]; then
+  "$PY" -m venv "$SCT_VENV"
+fi
+# Keep an existing checkout usable after dependency changes.
+"$SCT_VENV/bin/python" -m pip install -q -r requirements.txt
+exec "$SCT_VENV/bin/uvicorn" app.main:app --host "${SCT_HOST:-127.0.0.1}" --port "${PORT:-8000}"

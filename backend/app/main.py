@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import anchor, data, docking, graph, ml, model, store, weather
+from app import anchor, data, docking, graph, ml, model, operation_documents, operations, store, weather
 
 # Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
 # labelled in the UI); with it, POST endpoints require X-Write-Token.
@@ -42,18 +42,56 @@ app = FastAPI(
 STATIC_DIR = Path(__file__).parent / "static"
 
 
-@app.middleware("http")
-async def limit_body_size(request: Request, call_next):
-    """Reject oversized payloads early (Content-Length check; chunked
-    uploads are additionally bounded by the JSON parser limits below)."""
-    cl = request.headers.get("content-length")
-    if cl:
-        try:
-            if int(cl) > MAX_BODY_BYTES:
-                return JSONResponse({"detail": "payload too large"}, status_code=413)
-        except ValueError:
-            return JSONResponse({"detail": "invalid Content-Length"}, status_code=400)
-    return await call_next(request)
+class LimitBodySize:
+    """Bound HTTP bodies before form parsing, including chunked uploads."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope["method"] not in {"POST", "PUT", "PATCH"}:
+            return await self.app(scope, receive, send)
+        request = Request(scope)
+        upload = (
+            request.method == "POST"
+            and request.url.path.startswith("/api/operations/")
+            and request.url.path.rstrip("/").endswith("/documents")
+        )
+        limit = operation_documents.MAX_FILE_BYTES + MAX_BODY_BYTES if upload else MAX_BODY_BYTES
+        length = request.headers.get("content-length")
+        if length is not None:
+            try:
+                length = int(length)
+                if length < 0:
+                    raise ValueError
+            except ValueError:
+                return await JSONResponse({"detail": "invalid Content-Length"}, 400)(scope, receive, send)
+            if length > limit:
+                return await JSONResponse({"detail": "payload too large"}, 413)(scope, receive, send)
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                return await JSONResponse({"detail": "payload too large"}, 413)(scope, receive, send)
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        async def replay():
+            nonlocal body
+            if body is None:
+                return await receive()
+            message = {"type": "http.request", "body": bytes(body), "more_body": False}
+            body = None
+            return message
+
+        return await self.app(scope, replay, send)
+
+
+app.add_middleware(LimitBodySize)
 
 
 @app.middleware("http")
@@ -81,6 +119,9 @@ def guard_write(request: Request, x_write_token: str | None = Header(None)) -> N
         if len(bucket) >= WRITE_RATE_LIMIT:
             raise HTTPException(429, "too many write requests, retry later")
         bucket.append(now)
+
+
+app.include_router(operations.create_router(guard_write))
 
 
 @app.get("/api/health")
@@ -516,6 +557,7 @@ class EventCreate(BaseModel):
     confidence: str | None = Field(None, max_length=30)
     note: str | None = Field(None, max_length=300)
     correction_of: str | None = Field(None, max_length=40)
+    delay_h: float | None = Field(None, ge=0, le=720, allow_inf_nan=False)
 
     @field_validator("planned_ts", "actual_ts", "occurred_ts")
     @classmethod
@@ -537,10 +579,7 @@ class EventCreate(BaseModel):
 def create_event(shipment_id: str, req: EventCreate):
     """Ingestion path for ACTUAL shipment events (manual entry or adapter).
     received_ts is stamped by the server; source is mandatory."""
-    try:
-        return model.add_shipment_event(shipment_id, **req.model_dump())
-    except ValueError as e:
-        raise HTTPException(404, str(e))
+    return operations.record_event(shipment_id, req.model_dump())
 
 
 @app.get("/api/provenance")

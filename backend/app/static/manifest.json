@@ -1,17 +1,32 @@
 {
   "id": "/",
-  "name": "Smart Caspian Transit",
-  "short_name": "SCT",
+  "name": "Caspian — движение под контролем",
+  "short_name": "Caspian",
   "description": "Предиктивный цифровой двойник мультимодального хаба МТК «Север–Юг» (демо)",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#F4F6FA",
-  "theme_color": "#0B1626",
+  "background_color": "#07131b",
+  "theme_color": "#07131b",
   "lang": "ru",
   "icons": [
-    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
-    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
   ]
 }

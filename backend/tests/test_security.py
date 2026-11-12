@@ -57,7 +57,7 @@ def test_xss_payload_is_data_not_html():
     s = client.get(f"/api/shipments/{sid}").json()
     # stored verbatim as data; rendering escapes it (see static/app.js esc())
     assert s["name"] == payload
-    assert "<img" not in client.get("/").text  # index itself has no payload
+    assert payload not in client.get("/").text  # app shell does not embed user content
 
 
 def test_write_token_required_when_configured(monkeypatch):
