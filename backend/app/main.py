@@ -6,14 +6,25 @@ Docs: /docs
 from __future__ import annotations
 
 import os
+import threading
+import time
+from collections import deque
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app import data, graph, ml, model, weather
+
+# Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
+# labelled in the UI); with it, POST endpoints require X-Write-Token.
+WRITE_TOKEN = os.environ.get("SCT_WRITE_TOKEN", "")
+MAX_BODY_BYTES = int(os.environ.get("SCT_MAX_BODY_BYTES", "32768"))
+WRITE_RATE_LIMIT = int(os.environ.get("SCT_WRITE_RATE_LIMIT", "60"))  # per min per IP
+_rate_buckets: dict[str, deque] = {}
+_rate_lock = threading.Lock()
 
 app = FastAPI(
     title="Smart Caspian Transit",
@@ -27,6 +38,35 @@ app = FastAPI(
 )
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+@app.middleware("http")
+async def limit_body_size(request: Request, call_next):
+    """Reject oversized payloads early (Content-Length check; chunked
+    uploads are additionally bounded by the JSON parser limits below)."""
+    cl = request.headers.get("content-length")
+    if cl:
+        try:
+            if int(cl) > MAX_BODY_BYTES:
+                return JSONResponse({"detail": "payload too large"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "invalid Content-Length"}, status_code=400)
+    return await call_next(request)
+
+
+def guard_write(request: Request, x_write_token: str | None = Header(None)) -> None:
+    """Token (when configured) + per-IP write rate limit."""
+    if WRITE_TOKEN and x_write_token != WRITE_TOKEN:
+        raise HTTPException(401, "write token required: set X-Write-Token header")
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _rate_lock:
+        bucket = _rate_buckets.setdefault(ip, deque())
+        while bucket and now - bucket[0] > 60.0:
+            bucket.popleft()
+        if len(bucket) >= WRITE_RATE_LIMIT:
+            raise HTTPException(429, "too many write requests, retry later")
+        bucket.append(now)
 
 
 @app.get("/api/health")
@@ -78,7 +118,11 @@ def _parse_scenario(close: str = "", extra_customs_h: float = 0.0,
                     wind_ms: float | None = None) -> dict:
     sc: dict = {}
     if close:
-        sc["closed_nodes"] = [c.strip() for c in close.split(",") if c.strip()]
+        ids = [c.strip() for c in close.split(",") if c.strip()]
+        unknown = [c for c in ids if c not in data.NODES]
+        if unknown:
+            raise HTTPException(422, f"unknown nodes in close: {', '.join(unknown)}")
+        sc["closed_nodes"] = ids
     if extra_customs_h:
         sc["customs_extra_h"] = extra_customs_h
     if wave_m is not None:
@@ -86,6 +130,13 @@ def _parse_scenario(close: str = "", extra_customs_h: float = 0.0,
     if wind_ms is not None:
         sc["wind_ms"] = wind_ms
     return sc
+
+
+# Shared query constraints: physical ranges, useful 422 on violation.
+WEIGHT_Q = Query(48, gt=0, le=5000, description="Вес груза, т (0 < w ≤ 5000)")
+CUSTOMS_Q = Query(0.0, ge=0, le=168, description="Доп. таможенная очередь, ч (0–168)")
+WAVE_Q = Query(None, ge=0, le=15, description="Волна, м (0–15; переопределяет погоду)")
+WIND_Q = Query(None, ge=0, le=60, description="Ветер, м/с (0–60; переопределяет погоду)")
 
 
 @app.get("/api/graph")
@@ -97,7 +148,7 @@ def graph_view():
 
 @app.get("/api/routes/search")
 def routes_search(from_node: str = Query("moscow"), to_node: str = Query("bandar_abbas"),
-                  weight_t: float = Query(48, gt=0), storm: bool = False,
+                  weight_t: float = WEIGHT_Q, storm: bool = False,
                   objective: str = Query("time", pattern="^(time|cost|co2)$"),
                   k: int = Query(3, ge=1, le=5), close: str = ""):
     try:
@@ -111,10 +162,10 @@ def routes_search(from_node: str = Query("moscow"), to_node: str = Query("bandar
 
 
 @app.get("/api/routes/{route_id}/forecast")
-def route_forecast(route_id: str, weight_t: float = Query(48, gt=0),
+def route_forecast(route_id: str, weight_t: float = WEIGHT_Q,
                    storm: bool = False, close: str = "",
-                   extra_customs_h: float = 0.0,
-                   wave_m: float | None = None, wind_ms: float | None = None):
+                   extra_customs_h: float = CUSTOMS_Q,
+                   wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     route = data.get_route(route_id)
     if route is None:
         raise HTTPException(404, f"unknown route {route_id}")
@@ -127,8 +178,8 @@ def route_forecast(route_id: str, weight_t: float = Query(48, gt=0),
 
 
 @app.get("/api/compare")
-def compare(weight_t: float = Query(48, gt=0), storm: bool = False,
-            close: str = "", extra_customs_h: float = 0.0):
+def compare(weight_t: float = WEIGHT_Q, storm: bool = False,
+            close: str = "", extra_customs_h: float = CUSTOMS_Q):
     rows = model.compare_routes(
         weight_t, storm, _parse_scenario(close, extra_customs_h))
     if not rows:
@@ -157,11 +208,23 @@ class ShipmentCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     cargo: str = Field(min_length=1, max_length=200)
     weight_t: float = Field(gt=0, le=5000)
-    route_id: str
+    route_id: str = Field(max_length=20)
     docs: dict[str, str] | None = None
 
+    @field_validator("docs")
+    @classmethod
+    def docs_bounded(cls, v: dict[str, str] | None) -> dict[str, str] | None:
+        if v is None:
+            return v
+        if len(v) > 20:
+            raise ValueError("too many document entries (max 20)")
+        for k, val in v.items():
+            if len(k) > 50 or len(val) > 50:
+                raise ValueError("document keys/values must be ≤ 50 chars")
+        return v
 
-@app.post("/api/shipments", status_code=201)
+
+@app.post("/api/shipments", status_code=201, dependencies=[Depends(guard_write)])
 def create_shipment(req: ShipmentCreate):
     try:
         return model.create_shipment(req.name, req.cargo, req.weight_t,
@@ -195,11 +258,21 @@ def exceptions(storm: bool = False):
 
 
 class ClearanceRequest(BaseModel):
-    shipment_id: str
+    shipment_id: str = Field(max_length=30)
     docs: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("docs")
+    @classmethod
+    def docs_bounded(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 20:
+            raise ValueError("too many document entries (max 20)")
+        for k, val in v.items():
+            if len(k) > 50 or len(val) > 50:
+                raise ValueError("document keys/values must be ≤ 50 chars")
+        return v
 
-@app.post("/api/clearance/submit")
+
+@app.post("/api/clearance/submit", dependencies=[Depends(guard_write)])
 def clearance_submit(req: ClearanceRequest):
     try:
         entry = model.submit_clearance(req.shipment_id, req.docs)
@@ -219,7 +292,7 @@ def ml_info():
 
 
 @app.get("/api/ml/forecast")
-def ml_forecast(route_id: str, weight_t: float = Query(48, gt=0),
+def ml_forecast(route_id: str, weight_t: float = WEIGHT_Q,
                 storm: bool = False):
     route = data.get_route(route_id)
     if route is None:
