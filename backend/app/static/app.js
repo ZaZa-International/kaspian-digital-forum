@@ -7,10 +7,8 @@ let map, polylines = {};
 let searchLayer = null, lastPaths = [], nodeCache = {};
 let shipments = [];
 let currentShipment = null;
-const ic = (id, cls = "") => `<svg class="ic ${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
-const MODE_RU = { rail: `${ic("i-rail")} ж/д`, sea: `${ic("i-ship")} море`, road: `${ic("i-truck")} авто` };
-/* chart palette — docs/DESIGN_CONTRACT.md v2 */
-const ROUTE_COLORS = { R1: "#BE1E68", R2: "#1F7A8C", R3: "#D98324" };
+const MODE_RU = { rail: "🚂 ж/д", sea: "⛴ море", road: "🚛 авто" };
+const ROUTE_COLORS = { R1: "#0e7aa8", R2: "#1e7d46", R3: "#c96a12" };
 const fmtDT = (iso) => String(iso || "").slice(0, 16).replace("T", " ");
 
 function setBanner(text) {
@@ -37,32 +35,21 @@ function riskPill(p) {
 
 async function initMap() {
   map = L.map("map").setView([43.5, 50.0], 4);
-  /* Esri Light Gray canvas (no API key) — pale chart basemap + labels pane.
-     Offline: tiles fail silently, graticule background stays. */
-  map.createPane("labels");
-  map.getPane("labels").style.zIndex = 650;
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 16, attribution: "Esri · Garmin · FAO · NOAA",
-  }).addTo(map);
-  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 16, pane: "labels",
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 12, attribution: "&copy; OpenStreetMap",
   }).addTo(map);
   const routes = await getJSON("/api/routes");
   routes.routes.forEach((r) => {
     const pts = r.nodes.map((n) => [n.lat, n.lon]);
-    polylines[r.id] = L.polyline(pts, { color: ROUTE_COLORS[r.id], weight: 4, opacity: 0.9 })
+    polylines[r.id] = L.polyline(pts, { color: ROUTE_COLORS[r.id], weight: 4, opacity: 0.85 })
       .addTo(map).bindPopup(`<b>${esc(r.id)} · ${esc(r.name)}</b><br>${esc(r.via)}`);
   });
   const nodes = await getJSON("/api/nodes");
   nodes.nodes.forEach((n) => {
     nodeCache[n.id] = n;
-    L.circleMarker([n.lat, n.lon], { radius: 6, color: "#1C2B36", fillColor: "#FBF7EE", fillOpacity: 1, weight: 2 })
+    L.circleMarker([n.lat, n.lon], { radius: 6, color: "#06283d", fillColor: "#fff", fillOpacity: 1, weight: 2 })
       .addTo(map).bindPopup(`<b>${esc(n.name)}</b> (${esc(n.country)})<br>${esc(n.kind)}${n.note ? "<br><span class='hint'>" + esc(n.note) + "</span>" : ""}`);
   });
-  L.marker([42.0, 50.6], {
-    interactive: false,
-    icon: L.divIcon({ className: "sea-label", html: "Каспийское море", iconSize: [260, 20], iconAnchor: [130, 10] }),
-  }).addTo(map);
   searchLayer = L.layerGroup().addTo(map);
 }
 
@@ -93,7 +80,7 @@ async function loadCompare() {
     <tr><td><b>${esc(r.route_id)}</b> ${esc(r.route_name)}<br><span class="hint">${esc(r.via)}</span></td>
     <td>${r.total_predicted_h} ч${r.total_wait_h ? `<br><span class="hint">вкл. ожидание парома ${r.total_wait_h} ч</span>` : ""}</td><td>${r.eta_p90_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
     <td>${(r.co2_kg / 1000).toFixed(1)} т</td><td>$${esc(r.cost_usd.toLocaleString("ru-RU"))}</td>
-    <td>${r.route_id === data.best.time ? `<span class="best">${ic("i-clock")} быстрее</span>` : ""} ${r.route_id === data.best.co2 ? `<span class="best">${ic("i-leaf")} чище</span>` : ""} ${r.route_id === data.best.risk ? `<span class="best">${ic("i-shield")} надёжнее</span>` : ""}</td></tr>`).join("");
+    <td>${r.route_id === data.best.time ? "⏱ быстрее" : ""} ${r.route_id === data.best.co2 ? "🌱 чище" : ""} ${r.route_id === data.best.risk ? "🛡 надёжнее" : ""}</td></tr>`).join("");
   const best = data.routes.find((r) => r.route_id === data.best.co2);
   $("#kpi-co2").textContent = `${best.route_id}: ${(best.co2_kg / 1000).toFixed(1)} т CO₂`;
   const ports = await getJSON("/api/ports");
@@ -141,7 +128,7 @@ async function loadShipment() {
   $("#timeline").innerHTML = s.forecast.legs.map((l) => `
     <li class="${l.id === s.forecast.bottleneck_leg_id ? "bottleneck" : ""}">
       <b>${MODE_RU[l.mode]} ${esc(nameOf[l.from])} → ${esc(nameOf[l.to])}</b>
-      ${l.id === s.forecast.bottleneck_leg_id ? ` ${ic("i-alert")} узкое место` : ""}${l.conditional ? " <span class='pill medium'>условное плечо</span>" : ""}<br>
+      ${l.id === s.forecast.bottleneck_leg_id ? " ⚠ узкое место" : ""}${l.conditional ? " <span class='pill medium'>условное плечо</span>" : ""}<br>
       план ${l.base_h} ч${l.wait_h ? ` + ожидание парома ${l.wait_h} ч` : ""} → прогноз ${l.predicted_h} ч (+${l.delay_h} ч задержки)<br>
       <span class="why">${esc(l.reasons.join("; "))}</span>
       ${l.note ? `<br><span class="hint">${esc(l.note)}</span>` : ""}
@@ -166,15 +153,15 @@ async function loadShipment() {
   const attr = mlp.local_attribution.map((a) =>
     `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
   $("#ml-box").innerHTML =
-    `${ic("i-radar")} <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
+    `🤖 <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
     `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
     `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
     `Главные факторы глобально: ${esc(top)}. ` +
     `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>`;
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
-  const statusIcon = { done: ic("i-check", "st-done"), in_progress: ic("i-radar", "st-prog"), planned: ic("i-clock", "st-plan") };
+  const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
   const actualHtml = (tl.actual_events || []).map((e) => `
-    <li>${ic("i-flag", "st-done")} <b>${esc(e.title)}</b> <span class="pill ok">факт</span><br>
+    <li>📍 <b>${esc(e.title)}</b> <span class="pill ok">факт</span><br>
     <span class="hint">${esc(fmtDT(e.time))} · источник: ${esc(e.source)}${e.location ? " · " + esc(e.location) : ""}</span><br>
     <span class="why">${esc(e.note || "")}</span></li>`).join("");
   $("#events-timeline").innerHTML = actualHtml + tl.events.map((e) => `
@@ -186,8 +173,8 @@ async function loadShipment() {
 async function loadExceptions() {
   const data = await getJSON(`/api/exceptions?storm=${storm}${scenarioQuery()}`);
   $("#exceptions-list").innerHTML = data.exceptions.length ? data.exceptions.map((e) => `
-    <li class="exc ${esc(e.severity)}">${ic("i-alert")} <b>${esc(e.title)}</b><br>
-    ${esc(e.detail)}<br><span class="action">${ic("i-arrow")} ${esc(e.action)}</span></li>`).join("")
+    <li class="exc ${esc(e.severity)}"><b>${e.severity === "high" ? "🔴" : "🟡"} ${esc(e.title)}</b><br>
+    ${esc(e.detail)}<br><span class="action">→ ${esc(e.action)}</span></li>`).join("")
     : `<li class="hint">Исключений нет — все грузы в графике.</li>`;
 }
 
@@ -237,7 +224,7 @@ async function runSearch() {
 async function loadLedger() {
   const data = await getJSON("/api/clearance/ledger");
   $("#ledger").innerHTML = data.entries.length ? data.entries.map((e) => `
-    <li>#${e.seq} · ${esc(e.shipment_id)} · <b>${esc(e.decision === "pre-cleared" ? "pre-cleared" : "нужны документы: " + e.missing.join(", "))}</b> ${e.decision === "pre-cleared" ? ic("i-check", "st-done") : ic("i-alert", "st-plan")}<br>
+    <li>#${e.seq} · ${esc(e.shipment_id)} · <b>${esc(e.decision === "pre-cleared" ? "✅ pre-cleared" : "⚠ нужны документы: " + e.missing.join(", "))}</b><br>
     <span class="hint">${esc(e.issuer || "demo")} · правила ${esc(e.rule_version || "v0")} · ${esc(fmtDT(e.ts))}</span><br>
     <span class="hash">hash ${esc(e.hash.slice(0, 16))}… ← prev ${esc(e.prev_hash.slice(0, 12))}…</span></li>`).join("")
     : `<li class="hint">Пока пусто — отправьте груз на pre-clearance.</li>`;
@@ -268,7 +255,7 @@ async function loadPorts() {
   const data = await getJSON("/api/ports");
   $("#ports-grid").innerHTML = data.ports.map((p) => {
     const cls = p.congestion_pct >= 60 ? "hot" : p.congestion_pct >= 45 ? "warm" : "";
-    return `<div class="port-card"><b>${ic("i-anchor")} ${esc(p.name)}</b><br>
+    return `<div class="port-card"><b>${esc(p.name)}</b><br>
       <span class="hint">загруженность ${p.congestion_pct}% · таможня ~${p.customs_queue_h} ч</span>
       <div class="bar"><i class="${cls}" style="width:${p.congestion_pct}%"></i></div></div>`;
   }).join("");
@@ -279,15 +266,11 @@ async function loadLiveWeather() {
     const data = await getJSON("/api/weather/live");
     const parts = Object.values(data.segments).map((s) =>
       `${s.segment}: волна ${s.wave_m} м, ветер ${s.wind_ms} м/с`).join(" · ");
-    const badge = $("#live-badge");
-    badge.classList.toggle("is-live", !!data.live);
-    badge.classList.toggle("is-demo", !data.live);
-    badge.innerHTML = `<span class="live-dot" aria-hidden="true"></span>${ic("i-wave")} ` +
-      `<span class="live-text">${data.live ? `LIVE Open-Meteo: ${parts}` : `Погода: демо (live недоступен): ${parts}`}</span>`;
+    $("#live-badge").textContent = data.live
+      ? `🌊 LIVE Open-Meteo: ${parts}`
+      : `🌊 Погода: демо (live недоступен): ${parts}`;
   } catch (e) {
-    const badge = $("#live-badge");
-    badge.classList.add("is-demo");
-    badge.innerHTML = `<span class="live-dot" aria-hidden="true"></span>${ic("i-wave")} <span class="live-text">Погода: демо</span>`;
+    $("#live-badge").textContent = "🌊 Погода: демо";
   }
 }
 
@@ -320,19 +303,6 @@ function readScenarioInputs() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  document.documentElement.classList.add("js");
-  /* entrance reveal — progressive enhancement; timer never leaves content hidden */
-  const revealEls = document.querySelectorAll(".reveal");
-  const revealAll = () => revealEls.forEach((el) => el.classList.add("in"));
-  if ("IntersectionObserver" in window) {
-    const io = new IntersectionObserver((entries) => entries.forEach((en) => {
-      if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
-    }), { threshold: 0, rootMargin: "0px 0px -40px 0px" });
-    revealEls.forEach((el) => io.observe(el));
-    setTimeout(revealAll, 1600);
-  } else {
-    revealAll();
-  }
   try {
     await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather(), initSearch(), loadExceptions(), loadProvenance()]);
   } catch (e) {
@@ -341,34 +311,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     setBanner("⚠ API недоступен: проверьте, что бэкенд запущен (./run.sh). Данные не показаны.");
   }
   updateOfflineBanner();
-  runSearch().catch(() => {});
-  /* quick-nav scrollspy: current-section state */
-  const navLinks = [...document.querySelectorAll(".quick-nav a")];
-  const spy = () => {
-    const pos = window.scrollY + 220;
-    let cur = navLinks[0];
-    navLinks.forEach((a) => {
-      const sec = document.querySelector(a.getAttribute("href"));
-      if (sec && sec.offsetTop <= pos) cur = a;
-    });
-    navLinks.forEach((a) => a.classList.toggle("active", a === cur));
-  };
-  window.addEventListener("scroll", spy, { passive: true });
-  spy();
   $("#storm-btn").addEventListener("click", async () => {
     storm = !storm;
-    const btn = $("#storm-btn");
-    btn.setAttribute("aria-checked", String(storm));
-    btn.classList.toggle("on", storm);
-    document.body.classList.toggle("storm", storm);
-    const st = $("#storm-state");
-    if (st) st.textContent = storm ? "вкл" : "выкл";
-    Object.entries(polylines).forEach(([id, p]) => {
-      const seaRoute = id === "R1" || id === "R2";
-      p.setStyle({ color: storm && seaRoute ? "#C0392B" : ROUTE_COLORS[id] });
-      const el = p.getElement();
-      if (el) el.classList.toggle("storm-pulse", storm && seaRoute);
-    });
+    $("#storm-btn").textContent = storm ? "🌩 Шторм на Каспии: ВКЛ" : "🌩 Шторм на Каспии: выкл";
+    $("#storm-btn").classList.toggle("on", storm);
     $("#storm-note").textContent = storm
       ? "Шторм: ветер 19 м/с, волна 3,4 м — паромы не выходят, пропуск рейса +48 ч."
       : "Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.";
@@ -403,7 +349,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      $("#create-result").innerHTML = `${ic("i-check", "st-done")} Груз ${res.id} создан. ETA ${res.eta.slice(0, 16).replace("T", " ")}.`;
+      $("#create-result").textContent = `✅ Груз ${res.id} создан. ETA ${res.eta.slice(0, 16).replace("T", " ")}.`;
       await loadShipments();
       currentShipment = res.id;
       $("#shipment-select").value = res.id;
@@ -427,7 +373,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      $("#event-result").innerHTML = `${ic("i-check", "st-done")} Событие ${esc(res.event_type)} записано (источник: ${esc(res.source)}).`;
+      $("#event-result").textContent = `✅ Событие ${res.event_type} записано (источник: ${res.source}).`;
       $("#event-note").value = "";
       await loadShipment();
     } catch (e) {
@@ -446,9 +392,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
       await loadShipment();
       await loadExceptions();
-      $("#clearance-result").innerHTML = res.decision === "pre-cleared"
-        ? `${ic("i-check", "st-done")} Pre-clearance пройден (симуляция). Запись #${res.seq}, hash ${res.hash.slice(0, 16)}… Решение: ${esc(res.issuer)}, правила ${esc(res.rule_version)}.`
-        : `${ic("i-alert", "st-plan")} Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы». Решение: ${esc(res.issuer)}.`;
+      $("#clearance-result").textContent = res.decision === "pre-cleared"
+        ? `✅ Pre-clearance пройден (симуляция). Запись #${res.seq}, hash ${res.hash.slice(0, 16)}… Решение: ${res.issuer}, правила ${res.rule_version}.`
+        : `⚠ Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы». Решение: ${res.issuer}.`;
     } catch (e) {
       $("#clearance-result").textContent = "Ошибка pre-clearance: " + e.message;
     }

@@ -6,4 +6,3 @@ __pycache__/
 backend/app/data/
 .~lock.*#
 .playwright-mcp/
-.serena/
