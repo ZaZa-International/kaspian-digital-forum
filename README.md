@@ -103,6 +103,23 @@ curl -X POST localhost:8000/api/demo/reset
 
 API-документация: http://localhost:8000/docs
 
+### Эксплуатация (важно для деплоя)
+
+- Runtime-состояние — SQLite в `backend/app/data/sct.db` (в Docker — volume
+  `sct-data`). Процесс работает от non-root (uid 1000). **Если том был создан
+  старым образом и принадлежит root**, запись невозможна: приложение честно
+  покажет `store.ok=false` в `/api/health` и временно перейдёт на fallback
+  `/tmp/sct-data` (с маркировкой `fallback:true`; персистентность при
+  пересоздании контейнера не гарантируется). Постоянный фикс на сервере:
+  ```bash
+  docker exec -u root <container> chown -R 1000:1000 /app/backend/app/data
+  docker restart <container>
+  # или пересоздать том: docker compose down && docker volume rm <project>_sct-data && docker compose up -d
+  ```
+- `/api/health` показывает статус store (ok/degraded, путь, ошибка) —
+  используйте для мониторинга после деплоя.
+- Каталог данных можно переопределить: `SCT_DATA_DIR=/path/to/writable`.
+
 Переменные окружения: `SCT_WRITE_TOKEN` (опциональный токен записи,
 заголовок `X-Write-Token`; без него демо-режим открыт и маркирован),
 `SCT_WRITE_RATE_LIMIT` (записей/мин/IP, по умолчанию 60),

@@ -11,14 +11,41 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
+import tempfile
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATA_DIR = Path(os.environ.get("SCT_DATA_DIR", str(Path(__file__).parent / "data")))
+log = logging.getLogger("sct.store")
+
+_PREFERRED_DIR = Path(os.environ.get("SCT_DATA_DIR", str(Path(__file__).parent / "data")))
+
+
+def _writable(p: Path) -> bool:
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        probe = p / ".sct_write_probe"
+        probe.touch()
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+if _writable(_PREFERRED_DIR):
+    DATA_DIR = _PREFERRED_DIR
+else:
+    # Graceful degradation (e.g. root-owned docker volume vs non-root user):
+    # keep the demo writable, but label the fallback loudly in /api/health.
+    DATA_DIR = Path(tempfile.gettempdir()) / "sct-data"
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log.warning("SCT data dir %s is not writable; falling back to %s "
+                "(persistence across container recreation is NOT guaranteed). "
+                "Fix: chown the volume to the runtime user.", _PREFERRED_DIR, DATA_DIR)
 DB_PATH = DATA_DIR / "sct.db"
 
 _SCHEMA = """
@@ -420,11 +447,17 @@ def clear_events() -> None:
 
 
 def status() -> dict:
-    """Lightweight store health check ( surfaced in /api/health )."""
+    """Lightweight store health check (surfaced in /api/health)."""
     try:
         with _conn() as conn:
             conn.execute("SELECT 1")
-        return {"ok": True, "path": str(DB_PATH)}
+        out = {"ok": True, "path": str(DB_PATH)}
+        if DATA_DIR != _PREFERRED_DIR:
+            out["fallback"] = True
+            out["warning"] = (f"preferred dir {_PREFERRED_DIR} not writable; using {DATA_DIR}. "
+                              "Persistence across container recreation not guaranteed — "
+                              "chown the volume to the runtime user.")
+        return out
     except Exception as e:  # noqa: BLE001 - diagnostic surface
         return {"ok": False, "path": str(DB_PATH), "error": f"{type(e).__name__}: {e}"}
 
