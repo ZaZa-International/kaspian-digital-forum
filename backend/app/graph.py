@@ -83,8 +83,8 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
         wadj[u] = []
         for e in edges:
             pred = model.predict_leg({**e, "id": e["id"]}, storm, scenario)
-            w = (pred["cost_usd"] if objective == "cost"
-                 else pred["co2_kg"] if objective == "co2"
+            w = (pred["cost_usd_per_t"] if objective == "cost"
+                 else pred["co2_kg_per_t"] if objective == "co2"
                  else pred["predicted_h"])
             wadj[u].append({**e, "_w": w, "_pred": pred})
 
@@ -139,8 +139,8 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
         mc = model.simulate_route(
             {"id": "search", "name": "", "legs": path}, weight_t, storm, scenario)
         # NOTE: predict_leg returns co2/cost PER TONNE; scale by weight.
-        co2 = round(sum(l["co2_kg"] for l in legs) * weight_t)
-        cost = round(sum(l["cost_usd"] for l in legs) * weight_t)
+        co2 = round(sum(l["co2_kg_per_t"] for l in legs) * weight_t)
+        cost = round(sum(l["cost_usd_per_t"] for l in legs) * weight_t)
         out.append({
             "path_id": " → ".join(e["id"] for e in path),
             "nodes": [start] + [e["to"] for e in path],
