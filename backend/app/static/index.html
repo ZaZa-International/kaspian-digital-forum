@@ -75,6 +75,8 @@
   <span><b>Штормовое предупреждение.</b> Паромы не выходят, пропуск рейса +48 ч — все прогнозы, маршруты и грузы пересчитаны сценарием.</span>
 </div>
 
+<div id="alert-ticker" class="alert-ticker" role="marquee" aria-label="Лента предупреждений" hidden></div>
+
 <main id="main">
   <!-- 01 · Сводка -->
   <section class="section" id="overview" aria-labelledby="h-overview">
@@ -94,6 +96,10 @@
         <div class="corridor-title"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg>Коридор в цифрах — реальные данные</div>
         <div class="stats" id="corridor-stats"></div>
         <p class="hint">Источники: РЖД / Правительство РФ (окт 2026), Росморречфлот, АСОП. Подробно — <a href="#sources">в provenance</a>.</p>
+      </div>
+      <div class="panel-sub">
+        <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg>Что делать сейчас</h3></div>
+        <div id="recommendation" aria-live="polite"><p class="hint loading">Анализирую обстановку…</p></div>
       </div>
     </div>
   </section>
@@ -131,6 +137,10 @@
         </table>
       </div>
       <p class="hint">* <b>Срок с запасом</b> — время, в которое груз успевает в 9 случаях из 10 (200 вариантов погоды). <b>Риск срыва</b> — оценка, не точная вероятность. Время в пути = движение + ожидание парома (расписания нет, в среднем до 3 дней) + задержки. ** Стоимость — оценка по ставкам за тонно-км; CO₂ — оценка по международным коэффициентам. *** «Шторм добавляет» — средние часы, добавляемые штормом (2000 сценариев); сухопутный маршрут от моря не зависит → 0.</p>
+      <div class="panel-sub">
+        <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-activity"/></svg>Профиль маршрутов</h3></div>
+        <div id="radar-chart" class="chart radar-wrap"><p class="hint loading">Загружается…</p></div>
+      </div>
       <div class="panel-sub">
         <div class="sub-head">
           <h3><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>Срок доставки: обычная погода vs шторм</h3>
@@ -245,6 +255,7 @@
         <div class="panel-head"><div class="panel-head-text"><h3><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg>Цифровой двойник груза</h3></div></div>
         <label class="field">Груз<select id="shipment-select"></select></label>
         <div id="shipment-info" class="info-bar" aria-live="polite"></div>
+        <div id="twin-live" class="twin-live" aria-live="off"></div>
         <div class="panel-sub">
           <div class="sub-head"><h3>Создать груз</h3></div>
           <div class="form-row">
