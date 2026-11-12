@@ -3,6 +3,7 @@ multimodal hub (Caspian link). FastAPI backend + static frontend.
 Run:  ./run.sh        (or: uvicorn app.main:app --reload, from backend/)
 Docs: /docs
 """
+
 from __future__ import annotations
 
 import os
@@ -73,8 +74,12 @@ def guard_write(request: Request, x_write_token: str | None = Header(None)) -> N
 @app.get("/api/health")
 def health():
     st = store.status()
-    return {"status": "ok" if st["ok"] else "degraded",
-            "service": "smart-caspian-transit", "data": "demo-seed", "store": st}
+    return {
+        "status": "ok" if st["ok"] else "degraded",
+        "service": "smart-caspian-transit",
+        "data": "demo-seed",
+        "store": st,
+    }
 
 
 @app.get("/api/nodes")
@@ -86,8 +91,14 @@ def nodes():
 def ports():
     out = []
     for pid, p in data.PORTS.items():
-        out.append({**p, "name": data.NODES[pid]["name"],
-                    "lat": data.NODES[pid]["lat"], "lon": data.NODES[pid]["lon"]})
+        out.append(
+            {
+                **p,
+                "name": data.NODES[pid]["name"],
+                "lat": data.NODES[pid]["lat"],
+                "lon": data.NODES[pid]["lon"],
+            }
+        )
     return {"ports": out}
 
 
@@ -109,16 +120,26 @@ def corridor():
 
 @app.get("/api/routes")
 def routes():
-    return {"routes": [
-        {**r, "nodes": [data.NODES[n] for n in
-                        [leg["from"] for leg in r["legs"]] + [r["legs"][-1]["to"]]]}
-        for r in data.ROUTES
-    ]}
+    return {
+        "routes": [
+            {
+                **r,
+                "nodes": [
+                    data.NODES[n]
+                    for n in [leg["from"] for leg in r["legs"]] + [r["legs"][-1]["to"]]
+                ],
+            }
+            for r in data.ROUTES
+        ]
+    }
 
 
-def _parse_scenario(close: str = "", extra_customs_h: float = 0.0,
-                    wave_m: float | None = None,
-                    wind_ms: float | None = None) -> dict:
+def _parse_scenario(
+    close: str = "",
+    extra_customs_h: float = 0.0,
+    wave_m: float | None = None,
+    wind_ms: float | None = None,
+) -> dict:
     sc: dict = {}
     if close:
         ids = [c.strip() for c in close.split(",") if c.strip()]
@@ -139,68 +160,164 @@ def _parse_scenario(close: str = "", extra_customs_h: float = 0.0,
 WEIGHT_Q = Query(48, gt=0, le=5000, description="Вес груза, т (0 < w ≤ 5000)")
 CUSTOMS_Q = Query(0.0, ge=0, le=168, description="Доп. таможенная очередь, ч (0–168)")
 WAVE_Q = Query(None, ge=0, le=15, description="Волна, м (0–15; переопределяет погоду)")
-WIND_Q = Query(None, ge=0, le=60, description="Ветер, м/с (0–60; переопределяет погоду)")
+WIND_Q = Query(
+    None, ge=0, le=60, description="Ветер, м/с (0–60; переопределяет погоду)"
+)
 
 
 @app.get("/api/graph")
 def graph_view():
-    return {"nodes": list(data.NODES.values()),
-            "edges": [{k: v for k, v in e.items() if k != "route"}
-                      for e in data.GRAPH_EDGES]}
+    return {
+        "nodes": list(data.NODES.values()),
+        "edges": [
+            {k: v for k, v in e.items() if k != "route"} for e in data.GRAPH_EDGES
+        ],
+    }
 
 
 @app.get("/api/routes/search")
-def routes_search(from_node: str = Query("moscow"), to_node: str = Query("bandar_abbas"),
-                  weight_t: float = WEIGHT_Q, storm: bool = False,
-                  objective: str = Query("time", pattern="^(time|cost|co2)$"),
-                  k: int = Query(3, ge=1, le=5), close: str = "",
-                  extra_customs_h: float = CUSTOMS_Q,
-                  wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def routes_search(
+    from_node: str = Query("moscow"),
+    to_node: str = Query("bandar_abbas"),
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    objective: str = Query("time", pattern="^(time|cost|co2)$"),
+    k: int = Query(3, ge=1, le=5),
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     try:
         paths = graph.k_shortest_paths(
-            from_node, to_node, weight_t, storm,
-            _parse_scenario(close, extra_customs_h, wave_m, wind_ms), objective, k)
+            from_node,
+            to_node,
+            weight_t,
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+            objective,
+            k,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
-    return {"from": from_node, "to": to_node, "objective": objective,
-            "storm": storm, "paths": paths}
+    return {
+        "from": from_node,
+        "to": to_node,
+        "objective": objective,
+        "storm": storm,
+        "paths": paths,
+    }
+
+
+@app.get("/api/routes/pareto")
+def routes_pareto(
+    from_node: str = Query("moscow"),
+    to_node: str = Query("bandar_abbas"),
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
+    try:
+        points = graph.pareto_frontier(
+            from_node,
+            to_node,
+            weight_t,
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {
+        "from": from_node,
+        "to": to_node,
+        "storm": storm,
+        "points": points,
+        "scope": "non-dominated among time/cost/co2 objective sweeps (not exhaustive global Pareto)",
+    }
 
 
 @app.get("/api/routes/{route_id}/forecast")
-def route_forecast(route_id: str, weight_t: float = WEIGHT_Q,
-                   storm: bool = False, close: str = "",
-                   extra_customs_h: float = CUSTOMS_Q,
-                   wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def route_forecast(
+    route_id: str,
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     route = data.get_route(route_id)
     if route is None:
         raise HTTPException(404, f"unknown route {route_id}")
     try:
         return model.forecast_route(
-            route, weight_t, storm,
-            _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+            route,
+            weight_t,
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/routes/{route_id}/eta-distribution")
+def route_eta_distribution(
+    route_id: str,
+    weight_t: float = WEIGHT_Q,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
+    route = data.get_route(route_id)
+    if route is None:
+        raise HTTPException(404, f"unknown route {route_id}")
+    try:
+        return model.eta_distribution(
+            route,
+            weight_t,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
 
 
 @app.get("/api/compare")
-def compare(weight_t: float = WEIGHT_Q, storm: bool = False,
-            close: str = "", extra_customs_h: float = CUSTOMS_Q,
-            wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def compare(
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     rows = model.compare_routes(
-        weight_t, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+        weight_t, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
+    )
     if not rows:
         raise HTTPException(422, "all routes blocked by scenario")
     best_time = min(rows, key=lambda r: r["total_predicted_h"])["route_id"]
     best_co2 = min(rows, key=lambda r: r["co2_kg"])["route_id"]
     best_risk = min(rows, key=lambda r: r["delay_probability"])["route_id"]
-    return {"storm": storm, "weight_t": weight_t, "routes": rows,
-            "best": {"time": best_time, "co2": best_co2, "risk": best_risk}}
+    return {
+        "storm": storm,
+        "weight_t": weight_t,
+        "routes": rows,
+        "best": {"time": best_time, "co2": best_co2, "risk": best_risk},
+    }
 
 
 @app.get("/api/shipments")
-def shipments(storm: bool = False, close: str = "",
-              extra_customs_h: float = CUSTOMS_Q,
-              wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def shipments(
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     scenario = _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
     out = []
     for s in model.all_shipments():
@@ -210,10 +327,15 @@ def shipments(storm: bool = False, close: str = "",
         except ValueError:
             out.append({**s, "route_name": route["name"], "blocked": True})
             continue
-        out.append({**s, "route_name": route["name"],
-                    "delay_h": fc["delay_h"],
-                    "delay_probability": fc["delay_probability"],
-                    "co2_kg": fc["co2_kg"]})
+        out.append(
+            {
+                **s,
+                "route_name": route["name"],
+                "delay_h": fc["delay_h"],
+                "delay_probability": fc["delay_probability"],
+                "co2_kg": fc["co2_kg"],
+            }
+        )
     return {"shipments": out}
 
 
@@ -238,59 +360,90 @@ class ShipmentCreate(BaseModel):
 
 
 @app.post("/api/shipments", status_code=201, dependencies=[Depends(guard_write)])
-def create_shipment(req: ShipmentCreate,
-                    idempotency_key: str | None = Header(None, max_length=100)):
+def create_shipment(
+    req: ShipmentCreate, idempotency_key: str | None = Header(None, max_length=100)
+):
     try:
-        return model.create_shipment(req.name, req.cargo, req.weight_t,
-                                     req.route_id, req.docs,
-                                     idempotency_key=idempotency_key)
+        return model.create_shipment(
+            req.name,
+            req.cargo,
+            req.weight_t,
+            req.route_id,
+            req.docs,
+            idempotency_key=idempotency_key,
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
 
 
 @app.get("/api/shipments/{shipment_id}")
-def shipment_detail(shipment_id: str, storm: bool = False, close: str = "",
-                    extra_customs_h: float = CUSTOMS_Q,
-                    wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def shipment_detail(
+    shipment_id: str,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     route = data.get_route(s["route_id"])
     try:
         fc = model.forecast_route(
-            route, s["weight_t"], storm,
-            _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+            route,
+            s["weight_t"],
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return {**s, "route": route, "forecast": fc, "doc_types": data.DOC_TYPES,
-            "documents": model.ensure_documents(s)}
+    return {
+        **s,
+        "route": route,
+        "forecast": fc,
+        "doc_types": data.DOC_TYPES,
+        "documents": model.ensure_documents(s),
+    }
 
 
 @app.get("/api/shipments/{shipment_id}/timeline")
-def shipment_timeline(shipment_id: str, storm: bool = False, close: str = "",
-                      extra_customs_h: float = CUSTOMS_Q,
-                      wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def shipment_timeline(
+    shipment_id: str,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     try:
         return model.shipment_timeline(
-            s, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+            s, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
 
 
 @app.get("/api/exceptions")
-def exceptions(storm: bool = False, close: str = "",
-               extra_customs_h: float = CUSTOMS_Q,
-               wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def exceptions(
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     scenario = _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
     return {"storm": storm, "exceptions": model.compute_exceptions(storm, scenario)}
 
 
 class EventCreate(BaseModel):
-    event_type: str = Field(pattern="^(departure|arrival|gate_in|gate_out|load|discharge|"
-                                  "customs_start|customs_done|delay|note)$")
+    event_type: str = Field(
+        pattern="^(departure|arrival|gate_in|gate_out|load|discharge|"
+        "customs_start|customs_done|delay|note)$"
+    )
     leg_id: str | None = Field(None, max_length=30)
     planned_ts: str | None = Field(None, max_length=40)
     actual_ts: str | None = Field(None, max_length=40)
@@ -314,8 +467,11 @@ class EventCreate(BaseModel):
         return v
 
 
-@app.post("/api/shipments/{shipment_id}/events", status_code=201,
-          dependencies=[Depends(guard_write)])
+@app.post(
+    "/api/shipments/{shipment_id}/events",
+    status_code=201,
+    dependencies=[Depends(guard_write)],
+)
 def create_event(shipment_id: str, req: EventCreate):
     """Ingestion path for ACTUAL shipment events (manual entry or adapter).
     received_ts is stamped by the server; source is mandatory."""
@@ -335,7 +491,8 @@ class ClearanceRequest(BaseModel):
     docs: dict[str, str] = Field(
         default_factory=dict,
         description="Ссылки на документы {тип: reference}. Статусы назначает сервер "
-                    "(симуляция таможенного органа), не клиент.")
+        "(симуляция таможенного органа), не клиент.",
+    )
 
     @field_validator("docs")
     @classmethod
@@ -359,8 +516,11 @@ def clearance_submit(req: ClearanceRequest):
 
 @app.get("/api/clearance/ledger")
 def clearance_ledger():
-    return {"entries": model.ledger_entries(), "chain_valid": model.verify_ledger(),
-            "note": model.CLEARANCE_NOTE}
+    return {
+        "entries": model.ledger_entries(),
+        "chain_valid": model.verify_ledger(),
+        "note": model.CLEARANCE_NOTE,
+    }
 
 
 @app.get("/api/clearance/documents/{shipment_id}")
@@ -369,9 +529,14 @@ def clearance_documents(shipment_id: str):
         docs = model.get_documents(shipment_id)
     except ValueError as e:
         raise HTTPException(404, str(e))
-    return {"shipment_id": shipment_id, "documents": docs,
-            "doc_types": data.DOC_TYPES, "rule_version": model.DOC_RULE_VERSION,
-            "issuer": model.CLEARANCE_ISSUER, "note": model.CLEARANCE_NOTE}
+    return {
+        "shipment_id": shipment_id,
+        "documents": docs,
+        "doc_types": data.DOC_TYPES,
+        "rule_version": model.DOC_RULE_VERSION,
+        "issuer": model.CLEARANCE_ISSUER,
+        "note": model.CLEARANCE_NOTE,
+    }
 
 
 @app.post("/api/demo/reset", dependencies=[Depends(guard_write)])
@@ -386,30 +551,48 @@ def ml_info():
 
 
 @app.get("/api/ml/forecast")
-def ml_forecast(route_id: str, weight_t: float = WEIGHT_Q,
-                storm: bool = False, close: str = "",
-                extra_customs_h: float = CUSTOMS_Q,
-                wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def ml_forecast(
+    route_id: str,
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     route = data.get_route(route_id)
     if route is None:
         raise HTTPException(404, f"unknown route {route_id}")
     try:
-        return ml.predict_delay(route, weight_t, storm,
-                                _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+        return ml.predict_delay(
+            route,
+            weight_t,
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
 
 
 @app.get("/api/ml/shipment/{shipment_id}")
-def ml_shipment(shipment_id: str, storm: bool = False, close: str = "",
-                extra_customs_h: float = CUSTOMS_Q,
-                wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+def ml_shipment(
+    shipment_id: str,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     try:
-        return ml.predict_delay(data.get_route(s["route_id"]), s["weight_t"], storm,
-                                _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+        return ml.predict_delay(
+            data.get_route(s["route_id"]),
+            s["weight_t"],
+            storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
     except ValueError as e:
         raise HTTPException(422, str(e))
 
@@ -436,5 +619,9 @@ def index():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("app.main:app", host=os.environ.get("HOST", "0.0.0.0"),
-                port=int(os.environ.get("PORT", "8000")), reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host=os.environ.get("HOST", "0.0.0.0"),
+        port=int(os.environ.get("PORT", "8000")),
+        reload=True,
+    )

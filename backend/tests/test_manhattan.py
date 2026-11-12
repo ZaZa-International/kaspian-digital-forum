@@ -132,3 +132,41 @@ def test_search_api_algorithm_metadata():
     assert p["expansions_first_search"] >= 1
     cost = client.get("/api/routes/search?objective=cost").json()["paths"][0]
     assert cost["search_algorithm"] == "Dijkstra"
+
+
+# --- visualization endpoints (ETA distribution + Pareto frontier) -----------
+def test_eta_distribution_api():
+    body = client.get("/api/routes/R1/eta-distribution?weight_t=48").json()
+    assert body["bins"] > 0
+    assert len(body["edges"]) == body["bins"] + 1
+    assert sum(body["calm"]["counts"]) == body["n"]
+    assert sum(body["storm"]["counts"]) == body["n"]
+    assert body["storm_price_h"] >= 0
+    assert body["storm"]["p90"] >= body["calm"]["p90"]  # storm shifts ETA right
+
+
+def test_eta_distribution_unknown_route():
+    assert client.get("/api/routes/NOPE/eta-distribution").status_code == 404
+
+
+def test_pareto_api_frontier_nondominated():
+    body = client.get("/api/routes/pareto").json()
+    pts = body["points"]
+    assert pts and any(p["pareto"] for p in pts)
+    assert pts == sorted(pts, key=lambda p: p["time_h"])
+    front = [p for p in pts if p["pareto"]]
+    for p in front:
+        for o in pts:
+            if o is p:
+                continue
+            dominates = (
+                o["time_h"] <= p["time_h"]
+                and o["cost_usd"] <= p["cost_usd"]
+                and o["co2_kg"] <= p["co2_kg"]
+                and (
+                    o["time_h"] < p["time_h"]
+                    or o["cost_usd"] < p["cost_usd"]
+                    or o["co2_kg"] < p["co2_kg"]
+                )
+            )
+            assert not dominates

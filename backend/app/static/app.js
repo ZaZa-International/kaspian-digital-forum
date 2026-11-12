@@ -33,6 +33,100 @@ function riskPill(p) {
   return `<span class="pill ${cls}">${txt} (${Math.round(p * 100)}%)</span>`;
 }
 
+/* ---- inline-SVG charts (no dependencies, offline-friendly) ---- */
+const FEAT_RU = { max_wave_m: "Волна", max_wind_ms: "Ветер", max_congestion_pct: "Загруженность порта",
+  total_customs_h: "Таможня", sea_km: "Морской путь", rail_km: "Ж/д путь", weight_t: "Вес", sea_legs: "Морских плеч" };
+const co2Color = (v, lo, hi) => {
+  const t = hi > lo ? (v - lo) / (hi - lo) : 0;
+  const a = [46, 107, 79], b = [192, 57, 43];
+  const c = a.map((x, i) => Math.round(x + (b[i] - x) * t));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+};
+
+function renderEtaDist(d) {
+  const W = 720, H = 260, L = 48, R = 16, T = 30, B = 36, pw = W - L - R, ph = H - T - B;
+  const lo = d.edges[0], hi = d.edges[d.edges.length - 1];
+  const X = h => L + (h - lo) / (hi - lo) * pw;
+  const yMax = Math.max(...d.calm.counts, ...d.storm.counts, 1);
+  const Y = c => T + ph - (c / yMax) * ph;
+  let bars = "";
+  for (let i = 0; i < d.bins; i++) {
+    const x0 = X(d.edges[i]), w = Math.max(1, X(d.edges[i + 1]) - x0 - 1);
+    bars += `<rect x="${x0.toFixed(1)}" y="${Y(d.calm.counts[i]).toFixed(1)}" width="${w.toFixed(1)}" height="${(T + ph - Y(d.calm.counts[i])).toFixed(1)}" fill="var(--sea)" opacity="0.5"/>`;
+    bars += `<rect x="${x0.toFixed(1)}" y="${Y(d.storm.counts[i]).toFixed(1)}" width="${w.toFixed(1)}" height="${(T + ph - Y(d.storm.counts[i])).toFixed(1)}" fill="var(--bad)" opacity="0.45"/>`;
+  }
+  const pc = X(d.calm.p90), ps = X(d.storm.p90);
+  let xt = ""; for (let k = 0; k <= 4; k++) { const h = lo + (hi - lo) * k / 4; xt += `<text x="${X(h).toFixed(1)}" y="${H - 12}" font-size="11" fill="var(--mut)" text-anchor="middle">${Math.round(h)}</text>`; }
+  let yt = ""; for (let k = 0; k <= 3; k++) { const c = yMax * k / 3; yt += `<line x1="${L}" y1="${Y(c).toFixed(1)}" x2="${W - R}" y2="${Y(c).toFixed(1)}" stroke="#e6edf1"/><text x="${L - 6}" y="${(Y(c) + 3).toFixed(1)}" font-size="11" fill="var(--mut)" text-anchor="end">${Math.round(c)}</text>`; }
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Распределение ETA: спокойно и шторм">${yt}${bars}
+    <line x1="${pc.toFixed(1)}" y1="${T}" x2="${pc.toFixed(1)}" y2="${T + ph}" stroke="var(--sea)" stroke-width="2" stroke-dasharray="5 4"/>
+    <line x1="${ps.toFixed(1)}" y1="${T}" x2="${ps.toFixed(1)}" y2="${T + ph}" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 4"/>
+    <text x="${pc.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--sea)" text-anchor="middle">P90 ${d.calm.p90}</text>
+    <text x="${ps.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--bad)" text-anchor="middle">P90 ${d.storm.p90}</text>
+    <line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--mut)"/>${xt}
+    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">ETA, ч</text></svg>`;
+  $("#eta-dist").innerHTML = `<div class="chart-head"><b>${esc(d.route_id)}</b> · цена шторма W1 = <b>${d.storm_price_h} ч</b>
+    <span class="legend"><i style="background:var(--sea)"></i>спокойно <i style="background:var(--bad)"></i>шторм · пунктир = P90</span></div>${svg}
+    <p class="hint">Monte Carlo ${d.n} прогонов на реальном архиве погоды (seed ${d.seed}). Сдвиг распределения вправо — цена шторма в часах. Симуляция, не эмпирические исходы рейсов.</p>`;
+}
+
+function renderPareto(points) {
+  if (!points.length) { $("#pareto-chart").innerHTML = '<p class="hint">Нет кандидатов — все пути заблокированы сценарием.</p>'; return; }
+  const W = 720, H = 320, L = 56, R = 18, T = 20, B = 42, pw = W - L - R, ph = H - T - B;
+  const ts = points.map(p => p.time_h), cs = points.map(p => p.cost_usd), co = points.map(p => p.co2_kg);
+  const tlo = Math.min(...ts), thi = Math.max(...ts), clo = Math.min(...cs), chi = Math.max(...cs);
+  const colo = Math.min(...co), cohi = Math.max(...co);
+  const pad = (a, b) => (b - a) * 0.08 || 1;
+  const X = t => L + (t - tlo + pad(tlo, thi)) / (thi - tlo + 2 * pad(tlo, thi)) * pw;
+  const Y = c => T + ph - (c - clo + pad(clo, chi)) / (chi - clo + 2 * pad(clo, chi)) * ph;
+  const front = points.filter(p => p.pareto).sort((a, b) => a.time_h - b.time_h);
+  const poly = front.map(p => `${X(p.time_h).toFixed(1)},${Y(p.cost_usd).toFixed(1)}`).join(" ");
+  let dots = ""; points.forEach(p => {
+    dots += `<circle cx="${X(p.time_h).toFixed(1)}" cy="${Y(p.cost_usd).toFixed(1)}" r="${p.pareto ? 7 : 5}" fill="${co2Color(p.co2_kg, colo, cohi)}" stroke="${p.pareto ? 'var(--ink)' : 'none'}" stroke-width="2"><title>${esc(p.node_names.join(' → '))}\n${p.time_h} ч · $${p.cost_usd} · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · риск ${Math.round(p.risk * 100)}%${p.pareto ? ' · Парето-фронтир' : ''}</title></circle>`;
+  });
+  let xt = ""; for (let k = 0; k <= 4; k++) { const t = tlo + (thi - tlo) * k / 4; xt += `<text x="${X(t).toFixed(1)}" y="${H - 14}" font-size="11" fill="var(--mut)" text-anchor="middle">${Math.round(t)}</text>`; }
+  let yt = ""; for (let k = 0; k <= 3; k++) { const c = clo + (chi - clo) * k / 3; yt += `<line x1="${L}" y1="${Y(c).toFixed(1)}" x2="${W - R}" y2="${Y(c).toFixed(1)}" stroke="#e6edf1"/><text x="${L - 6}" y="${(Y(c) + 3).toFixed(1)}" font-size="11" fill="var(--mut)" text-anchor="end">$${Math.round(c)}</text>`; }
+  const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Парето-фронтир: время, стоимость, CO2">${yt}
+    <polyline points="${poly}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.6"/>${dots}
+    <line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--mut)"/>${xt}
+    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">Время в пути, ч →</text>
+    <text x="14" y="${T + ph / 2}" font-size="11" fill="var(--mut)" text-anchor="middle" transform="rotate(-90 14 ${T + ph / 2})">Стоимость, $ →</text></svg>`;
+  $("#pareto-chart").innerHTML = `<div class="chart-head"><b>${points.length}</b> кандидатов · <b>${front.length}</b> на фронтире
+    <span class="legend"><i style="background:var(--ok)"></i>меньше CO₂ <i style="background:var(--bad)"></i>больше CO₂ · обводка = фронтир</span></div>${svg}
+    <p class="hint">Фронтир — недоминируемые маршруты среди свипа целей время/стоимость/CO₂ (не глобальный перебор). Наведи на точку — детали маршрута.</p>`;
+}
+
+function renderAttribution(attr) {
+  if (!attr || !attr.length) return "";
+  const mx = Math.max(...attr.map(a => Math.abs(a.contribution_h)), 1);
+  const rows = attr.map(a => {
+    const w = Math.abs(a.contribution_h) / mx * 100, col = a.contribution_h >= 0 ? 'var(--bad)' : 'var(--ok)', sign = a.contribution_h >= 0 ? '+' : '';
+    return `<div class="attr-row"><span class="attr-lbl">${esc(FEAT_RU[a.feature] || a.feature)}</span><span class="attr-track"><i style="width:${w.toFixed(0)}%;background:${col}"></i></span><span class="attr-val">${sign}${a.contribution_h} ч</span></div>`;
+  }).join("");
+  return `<div class="attr"><div class="attr-title">Вклад факторов в задержку (окклюзионная атрибуция):</div>${rows}</div>`;
+}
+
+function renderGauge(ex) {
+  if (!ex || ex.l1_to_median == null) return "";
+  const scaleMax = Math.max(ex.train_max, ex.l1_to_median) * 1.08 || 1;
+  const thr = ex.train_p95 / scaleMax * 100, pos = Math.min(100, ex.l1_to_median / scaleMax * 100);
+  const cls = ex.is_extrapolating ? 'high' : 'ok';
+  return `<div class="gauge-wrap"><div class="gauge-title">L1-расстояние до опыта модели <span class="pill ${cls}">${ex.is_extrapolating ? '⚠ экстраполяция' : 'в пределах опыта'}</span></div>
+    <div class="gauge"><i class="gauge-ok" style="width:${thr.toFixed(1)}%"></i><i class="gauge-bad" style="width:${(100 - thr).toFixed(1)}%"></i><span class="gauge-thr" style="left:${thr.toFixed(1)}%"></span><span class="gauge-marker" style="left:${pos.toFixed(1)}%"></span></div>
+    <div class="gauge-scale"><span>0</span><span>порог p95 = ${ex.train_p95}</span><span>текущий L1 = ${ex.l1_to_median}</span></div></div>`;
+}
+
+async function loadEtaDist() {
+  const rid = $("#eta-route") ? $("#eta-route").value : "R1";
+  renderEtaDist(await getJSON(`/api/routes/${rid}/eta-distribution?weight_t=48${scenarioQuery()}`));
+}
+
+async function loadPareto() {
+  const from = $("#search-from").value || "moscow", to = $("#search-to").value || "bandar_abbas";
+  const d = await getJSON(`/api/routes/pareto?from_node=${from}&to_node=${to}&weight_t=48&storm=${storm}${scenarioQuery()}`);
+  renderPareto(d.points);
+}
+
 async function initMap() {
   map = L.map("map").setView([43.5, 50.0], 4);
   L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -154,19 +248,17 @@ async function loadShipment() {
   const attr = mlp.local_attribution.map((a) =>
     `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
   const ex = mlp.extrapolation || {};
-  const exFlag = ex.is_extrapolating
-    ? `<span class="pill high">⚠ ЭКСТРАПОЛЯЦИЯ: L1 ${ex.l1_to_median} &gt; p95 опыта ${ex.train_p95} — модель вне своего опыта, доверяйте скорингу</span><br>`
-    : `<span class="pill ok">в пределах опыта: L1 ${ex.l1_to_median} ≤ p95 ${ex.train_p95}</span><br>`;
   const analogs = (mlp.analogs || []).map((a) =>
     `волна ${a.max_wave_m} м, ветер ${a.max_wind_ms} м/с, порт ${a.max_congestion_pct}% → +${a.delay_h} ч (L1 ${a.l1})`).join("; ");
   $("#ml-box").innerHTML =
-    exFlag +
+    renderGauge(ex) +
     `🤖 <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
     `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
     `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
     `Главные факторы глобально: ${esc(top)}. ` +
     `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>` +
-    (analogs ? `<br><span class="hint">Похожие сценарии (kNN по манхэттенскому L1, демо-аналоги — иллюстрация, не точный прогноз): ${esc(analogs)}.</span>` : "");
+    renderAttribution(mlp.local_attribution) +
+    (analogs ? `<div class="hint analogs">Похожие сценарии (kNN по манхэттенскому L1, демо-аналоги — иллюстрация, не точный прогноз): ${esc(analogs)}.</div>` : "");
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
   const actualHtml = (tl.actual_events || []).map((e) => `
@@ -297,7 +389,7 @@ async function runQuote() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadCompare(), loadShipments(), loadExceptions()]);
+  await Promise.all([loadCompare(), loadShipments(), loadExceptions(), loadEtaDist(), loadPareto()]);
   if ($("#search-results").children.length) await runSearch();
 }
 
@@ -320,6 +412,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     setBanner("⚠ API недоступен: проверьте, что бэкенд запущен (./run.sh). Данные не показаны.");
   }
   updateOfflineBanner();
+  loadEtaDist().catch(() => {});
+  loadPareto().catch(() => {});
+  if ($("#eta-route")) $("#eta-route").addEventListener("change", () => loadEtaDist().catch(() => {}));
   $("#storm-btn").addEventListener("click", async () => {
     storm = !storm;
     $("#storm-btn").textContent = storm ? "🌩 Шторм на Каспии: ВКЛ" : "🌩 Шторм на Каспии: выкл";
@@ -329,7 +424,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       : "Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.";
     await refreshAll();
   });
-  $("#search-btn").addEventListener("click", runSearch);
+  $("#search-btn").addEventListener("click", async () => { await runSearch(); loadPareto().catch(() => {}); });
   $("#scenario-btn").addEventListener("click", async () => {
     readScenarioInputs();
     await Promise.all([refreshAll(), runQuote()]);

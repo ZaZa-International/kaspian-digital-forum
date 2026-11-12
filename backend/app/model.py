@@ -290,6 +290,54 @@ def storm_price_h(
     return result
 
 
+def eta_distribution(
+    route: dict,
+    weight_t: float,
+    scenario: dict | None = None,
+    n: int = 2000,
+    seed: int = 7,
+    bins: int = 28,
+) -> dict:
+    """Calm vs storm ETA histograms over a shared bin range, with P50/P90/P95
+    markers and the W1 storm price. Powers the distribution chart so the
+    Monte Carlo uncertainty is visible, not just a number. Simulation on the
+    real weather archive — not empirical outcomes."""
+    scenario = scenario or {}
+    calm = simulate_route(
+        route, weight_t, False, scenario, n, seed, return_samples=True
+    )
+    storm = simulate_route(
+        route, weight_t, True, scenario, n, seed, return_samples=True
+    )
+    ca, sa = np.array(calm["samples"]), np.array(storm["samples"])
+    lo, hi = float(min(ca.min(), sa.min())), float(max(ca.max(), sa.max()))
+    edges = np.linspace(lo, hi, bins + 1)
+    cc, _ = np.histogram(ca, bins=edges)
+    sc, _ = np.histogram(sa, bins=edges)
+    return {
+        "route_id": route["id"],
+        "n": n,
+        "seed": seed,
+        "bins": bins,
+        "edges": [round(float(e), 1) for e in edges],
+        "calm": {
+            "counts": cc.tolist(),
+            "p50": calm["eta_p50_h"],
+            "p90": calm["eta_p90_h"],
+            "p95": calm["eta_p95_h"],
+        },
+        "storm": {
+            "counts": sc.tolist(),
+            "p50": storm["eta_p50_h"],
+            "p90": storm["eta_p90_h"],
+            "p95": storm["eta_p95_h"],
+        },
+        "storm_price_h": storm_price_h(route, scenario, n, seed)["storm_price_h"],
+        "kind": "Monte Carlo ETA histograms (calm vs storm), real weather archive",
+        "note": "Симуляция, не эмпирические исходы рейсов. W1 — сдвиг распределения в часах.",
+    }
+
+
 def forecast_route(
     route: dict, weight_t: float, storm: bool = False, scenario: dict | None = None
 ) -> dict:

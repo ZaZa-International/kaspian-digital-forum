@@ -286,3 +286,53 @@ def k_shortest_paths(
         r["pareto_optimal"] = r in pareto
         r["pareto_scope"] = "among returned k candidates (heuristic, not global Pareto)"
     return out
+
+
+def pareto_frontier(
+    start: str,
+    goal: str,
+    weight_t: float,
+    storm: bool = False,
+    scenario: dict | None = None,
+    k: int = 3,
+) -> list[dict]:
+    """Multi-objective trade-off candidates: union of K-shortest paths swept
+    over the time / cost / CO2 objectives, deduplicated, with a true Pareto
+    flag on (time, cost, co2). The frontier is the non-dominated set AMONG
+    these candidates (a scalarization sweep, not an exhaustive global search).
+    Powers the time×cost×CO2 scatter."""
+    seen: dict[tuple, dict] = {}
+    for obj in ("time", "cost", "co2"):
+        for p in k_shortest_paths(start, goal, weight_t, storm, scenario, obj, k):
+            sig = tuple(p["nodes"])
+            if sig not in seen:
+                seen[sig] = p
+    pts = list(seen.values())
+    out = []
+    for p in pts:
+        dominated = any(
+            o is not p
+            and o["total_predicted_h"] <= p["total_predicted_h"]
+            and o["cost_usd"] <= p["cost_usd"]
+            and o["co2_kg"] <= p["co2_kg"]
+            and (
+                o["total_predicted_h"] < p["total_predicted_h"]
+                or o["cost_usd"] < p["cost_usd"]
+                or o["co2_kg"] < p["co2_kg"]
+            )
+            for o in pts
+        )
+        out.append(
+            {
+                "nodes": p["nodes"],
+                "node_names": p["node_names"],
+                "time_h": p["total_predicted_h"],
+                "cost_usd": p["cost_usd"],
+                "co2_kg": p["co2_kg"],
+                "risk": p["delay_probability"],
+                "modes": p["modes"],
+                "pareto": not dominated,
+            }
+        )
+    out.sort(key=lambda d: d["time_h"])
+    return out
