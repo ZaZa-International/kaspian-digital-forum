@@ -1,12 +1,20 @@
-"""Hermetic test environment: no live network calls.
+"""Hermetic test environment + CI import path.
 
-Live weather is mocked to deterministic values; the offline fallback is
-exercised explicitly in test_weather.py. ML trains from the local archive
-file, Monte Carlo uses a fixed seed — the whole suite is reproducible.
+- Makes `app` importable both for `cd backend && pytest` and for
+  `pytest backend/tests` from the repo root (CI).
+- No live network calls: live weather is mocked to deterministic values;
+  the offline fallback is exercised explicitly in test_weather.py.
+  ML trains from the local archive file, Monte Carlo uses a fixed seed —
+  the whole suite is reproducible.
 """
+import sys
+from pathlib import Path
+
 import pytest
 
-from app import weather
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app import weather  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
