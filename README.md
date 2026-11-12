@@ -107,19 +107,24 @@ API-документация: http://localhost:8000/docs
 
 ### Эксплуатация (важно для деплоя)
 
-- Runtime-состояние — SQLite в `backend/app/data/sct.db` (в Docker — volume
-  `sct-data-v2`). Процесс работает от non-root (uid 1000). Том `sct-data-v2`
-  создаётся из каталога образа, принадлежащего appuser, поэтому доступен на
-  запись (старый том `sct-data` был создан root'ом прежним образом и вызывал
-  fallback; он не используется и остаётся на хосте нетронутым).
+- Runtime-состояние — SQLite в `backend/app/data/sct.db` (в Docker — volume).
+  Сервер работает от non-root (uid 1000). Образ стартует через
+  `backend/entrypoint.sh`: если контейнер запущен от root, entrypoint делает
+  `chown` каталога данных на appuser и сбрасывает привилегии (`setpriv`) —
+  это чинит том, созданный root'ом старого образа, без доступа к серверу
+  (паттерн postgres/mysql: от root работает только короткий entrypoint,
+  сам uvicorn — от appuser). Если контейнер запущен сразу от non-root,
+  entrypoint просто exec'ает сервер.
   **Если том всё же недоступен на запись**, приложение честно
   покажет `store.ok=false`/`fallback:true` в `/api/health` и временно перейдёт
   на fallback `/tmp/sct-data` (персистентность при пересоздании контейнера не
-  гарантируется). Постоянный фикс на сервере:
+  гарантируется). Запасной фикс на сервере:
   ```bash
   docker exec -u root <container> chown -R 1000:1000 /app/backend/app/data
   docker restart <container>
   ```
+  Локальный `docker compose up` использует том `sct-data-v2` (создаётся из
+  каталога образа, принадлежащего appuser, поэтому доступен на запись).
 - Образ включает DLT-зависимости (`requirements-dlt.txt`: web3 + eth-tester[py-evm]),
   поэтому DLT-якорь реестра работает live на локальном EVM devnet (не mainnet).
   Без этих пакетов приложение работает, якорь честно деградирует до hash-chain.
