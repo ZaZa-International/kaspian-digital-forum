@@ -11,6 +11,16 @@ const MODE_RU = { rail: "🚂 ж/д", sea: "⛴ море", road: "🚛 авто"
 const ROUTE_COLORS = { R1: "#0e7aa8", R2: "#1e7d46", R3: "#c96a12" };
 const fmtDT = (iso) => String(iso || "").slice(0, 16).replace("T", " ");
 
+function setBanner(text) {
+  const b = $("#offline-banner");
+  if (text) { b.textContent = text; b.hidden = false; } else { b.hidden = true; }
+}
+function updateOfflineBanner() {
+  setBanner(navigator.onLine ? "" : "⚠ Офлайн: API недоступен — данные не обновляются, карта без тайлов.");
+}
+window.addEventListener("online", () => { updateOfflineBanner(); refreshAll().catch(() => {}); });
+window.addEventListener("offline", updateOfflineBanner);
+
 async function getJSON(url, opts) {
   const r = await fetch(url, opts);
   if (!r.ok) throw new Error(url + " -> " + r.status);
@@ -293,7 +303,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (e) {
     console.error(e);
     $("#verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
+    setBanner("⚠ API недоступен: проверьте, что бэкенд запущен (./run.sh). Данные не показаны.");
   }
+  updateOfflineBanner();
   $("#storm-btn").addEventListener("click", async () => {
     storm = !storm;
     $("#storm-btn").textContent = storm ? "🌩 Шторм на Каспии: ВКЛ" : "🌩 Шторм на Каспии: выкл";
