@@ -4,6 +4,7 @@ const $ = (s) => document.querySelector(s);
 let storm = false;
 let scenario = { close: "", extra_customs_h: 0, wave_m: null, wind_ms: null };
 let map, polylines = {};
+let searchLayer = null, lastPaths = [], nodeCache = {};
 let shipments = [];
 let currentShipment = null;
 const MODE_RU = { rail: "🚂 ж/д", sea: "⛴ море", road: "🚛 авто" };
@@ -35,9 +36,23 @@ async function initMap() {
   });
   const nodes = await getJSON("/api/nodes");
   nodes.nodes.forEach((n) => {
+    nodeCache[n.id] = n;
     L.circleMarker([n.lat, n.lon], { radius: 6, color: "#06283d", fillColor: "#fff", fillOpacity: 1, weight: 2 })
-      .addTo(map).bindPopup(`<b>${esc(n.name)}</b> (${esc(n.country)})<br>${esc(n.kind)}`);
+      .addTo(map).bindPopup(`<b>${esc(n.name)}</b> (${esc(n.country)})<br>${esc(n.kind)}${n.note ? "<br><span class='hint'>" + esc(n.note) + "</span>" : ""}`);
   });
+  searchLayer = L.layerGroup().addTo(map);
+}
+
+function drawSearchPath(idx) {
+  if (!searchLayer || !lastPaths[idx]) return;
+  searchLayer.clearLayers();
+  const p = lastPaths[idx];
+  const pts = p.nodes.map((id) => [nodeCache[id].lat, nodeCache[id].lon]);
+  L.polyline(pts, { color: "#c0392b", weight: 5, opacity: 0.9, dashArray: "8 6" })
+    .addTo(searchLayer)
+    .bindPopup(`<b>Выбранный маршрут (схема)</b><br>${esc(p.node_names.join(" → "))}<br>${p.total_predicted_h} ч · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т`);
+  pts.forEach((pt) => L.circleMarker(pt, { radius: 5, color: "#c0392b", fillColor: "#fff", fillOpacity: 1, weight: 2 }).addTo(searchLayer));
+  map.fitBounds(L.latLngBounds(pts).pad(0.2));
 }
 
 function scenarioQuery() {
@@ -98,9 +113,10 @@ async function loadShipment() {
   $("#timeline").innerHTML = s.forecast.legs.map((l) => `
     <li class="${l.id === s.forecast.bottleneck_leg_id ? "bottleneck" : ""}">
       <b>${MODE_RU[l.mode]} ${esc(nameOf[l.from])} → ${esc(nameOf[l.to])}</b>
-      ${l.id === s.forecast.bottleneck_leg_id ? " ⚠ узкое место" : ""}<br>
+      ${l.id === s.forecast.bottleneck_leg_id ? " ⚠ узкое место" : ""}${l.conditional ? " <span class='pill medium'>условное плечо</span>" : ""}<br>
       план ${l.base_h} ч${l.wait_h ? ` + ожидание парома ${l.wait_h} ч` : ""} → прогноз ${l.predicted_h} ч (+${l.delay_h} ч задержки)<br>
       <span class="why">${esc(l.reasons.join("; "))}</span>
+      ${l.note ? `<br><span class="hint">${esc(l.note)}</span>` : ""}
     </li>`).join("");
   $("#verdict").textContent =
     `Прогноз: ${s.forecast.total_predicted_h} ч = ход ${s.forecast.total_base_h} ч` +
@@ -162,12 +178,28 @@ async function runSearch() {
     $("#search-results").innerHTML = `<p class="hint">Поиск не выполнен: ${esc(e.message)}. Проверьте параметры сценария.</p>`;
     return;
   }
+  lastPaths = data.paths;
   $("#search-results").innerHTML = data.paths.length ? data.paths.map((p, i) => `
-    <div class="path-card"><b>${i + 1}. ${esc(p.node_names.join(" → "))}</b>
-    ${p.pareto_optimal ? " <span class='pill ok'>Парето-оптимален</span>" : ""}<br>
+    <div class="path-card" data-idx="${i}" title="Показать на карте"><b>${i + 1}. ${esc(p.node_names.join(" → "))}</b>
+    ${p.pareto_optimal ? " <span class='pill ok'>Парето (среди найденных)</span>" : ""}
+    ${p.has_conditional_legs ? " <span class='pill medium'>есть условные плечи</span>" : ""}<br>
     <span class="hint">${p.modes.map((m) => MODE_RU[m]).join(" · ")}</span><br>
     ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · P90 симуляции ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · индекс риска ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}</div>`).join("")
     : `<p class="hint">Маршрутов нет — все пути заблокированы сценарием.</p>`;
+  document.querySelectorAll("#search-results .path-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      document.querySelectorAll("#search-results .path-card").forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+      drawSearchPath(+card.dataset.idx);
+    });
+  });
+  if (data.paths.length) {
+    drawSearchPath(0);
+    const first = document.querySelector("#search-results .path-card");
+    if (first) first.classList.add("selected");
+  } else if (searchLayer) {
+    searchLayer.clearLayers();
+  }
 }
 
 async function loadLedger() {

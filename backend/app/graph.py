@@ -13,6 +13,7 @@ weather, congestion and scenarios change the optimal route.
 from __future__ import annotations
 
 import heapq
+from itertools import count
 
 from app import data, model
 
@@ -97,7 +98,8 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
     if first is None:
         return []
     results = [first]
-    candidates: list[tuple[float, list[dict]]] = []
+    candidates: list[tuple[float, int, list[dict]]] = []
+    tie = count()  # stable heap order on equal costs (dicts are not comparable)
     for _ in range(k - 1):
         last = results[-1]
         for i in range(len(last)):
@@ -116,12 +118,12 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
             sig = tuple(e["id"] for e in total)
             if any(tuple(e["id"] for e in p) == sig for p in results):
                 continue
-            if any(tuple(e["id"] for e in p) == sig for _, p in candidates):
+            if any(tuple(e["id"] for e in p) == sig for _, _, p in candidates):
                 continue
-            heapq.heappush(candidates, (_path_cost(total), total))
+            heapq.heappush(candidates, (_path_cost(total), next(tie), total))
         if not candidates:
             break
-        _, best = heapq.heappop(candidates)
+        _, _, best = heapq.heappop(candidates)
         results.append(best)
 
     out = []
@@ -152,9 +154,11 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
             "delay_probability": round(prob, 2),
             "co2_kg": co2, "cost_usd": cost,
             "modes": [e["mode"] for e in path],
+            "has_conditional_legs": any(l.get("conditional") for l in legs),
             "eta_p50_h": mc["eta_p50_h"], "eta_p90_h": mc["eta_p90_h"],
         })
-    # Pareto filter on (time, cost, co2): keep non-dominated paths.
+    # Pareto filter on (time, cost, co2) AMONG THE RETURNED CANDIDATES.
+    # This is a heuristic label, not a global multi-objective Pareto search.
     pareto = []
     for r in out:
         dominated = any(
@@ -167,4 +171,5 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
             pareto.append(r)
     for r in out:
         r["pareto_optimal"] = r in pareto
+        r["pareto_scope"] = "among returned k candidates (heuristic, not global Pareto)"
     return out

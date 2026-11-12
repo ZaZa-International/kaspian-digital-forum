@@ -36,8 +36,9 @@ NODES = {
                     "lat": 42.98, "lon": 47.50, "kind": "port_rail"},
     "baku": {"id": "baku", "name": "Баку", "country": "Азербайджан",
              "lat": 40.37, "lon": 49.85, "kind": "port_rail"},
-    "aktau": {"id": "aktau", "name": "Актау", "country": "Казахстан",
-              "lat": 43.65, "lon": 51.15, "kind": "port_rail"},
+    "aktau": {"id": "aktau", "name": "Актау / Курык", "country": "Казахстан",
+              "lat": 43.65, "lon": 51.15, "kind": "port_rail",
+              "note": "Паромный терминал — Курык (южнее Актау); порт Актау не принимает паромы с 2018 (Caravanistan, 06.2026)."},
     "turkmenbashi": {"id": "turkmenbashi", "name": "Туркменбаши", "country": "Туркменистан",
                      "lat": 40.02, "lon": 52.97, "kind": "port"},
     "enzeli": {"id": "enzeli", "name": "Энзели", "country": "Иран",
@@ -102,7 +103,10 @@ ROUTES = [
              "distance_km": 1820, "base_h": 40, "port": "makhachkala", "customs_h": 0},
             {"id": "R1-L2", "mode": "sea", "from": "makhachkala", "to": "amirabad",
              "distance_km": 930, "base_h": 50, "sea": "caspian_west",
-             "sailing_interval_h": 72, "port": "amirabad", "customs_h": 5},
+             "sailing_interval_h": 72, "port": "amirabad", "customs_h": 5,
+             "conditional": True,
+             "note": "Условное плечо: регулярная линия Махачкала–Амирабад не подтверждена "
+                     "(тестовый рейс 2020, анонсы 2026 — см. docs/RESEARCH.md)."},
             {"id": "R1-L3", "mode": "rail", "from": "amirabad", "to": "bandar_abbas",
              "distance_km": 1300, "base_h": 32, "port": None, "customs_h": 0},
         ],
@@ -117,7 +121,10 @@ ROUTES = [
              "distance_km": 445, "base_h": 26, "sea": "caspian_north",
              "sailing_interval_h": 72, "port": "aktau", "customs_h": 11},
             {"id": "R2-L3", "mode": "rail", "from": "aktau", "to": "bandar_abbas",
-             "distance_km": 2100, "base_h": 52, "port": None, "customs_h": 4},
+             "distance_km": 2100, "base_h": 52, "port": None, "customs_h": 4,
+             "conditional": True,
+             "note": "Условное длинное плечо: ж/д через Казахстан–Туркменистан–Иран (KTI), "
+                     "маршрут абстрактный, точный километраж не верифицирован."},
         ],
     },
     {
@@ -159,6 +166,16 @@ GRAPH_EDGES += [
      "distance_km": 600, "base_h": 15, "port": None, "customs_h": 0},
     {"id": "G-ASR-MAH", "mode": "rail", "from": "astrakhan", "to": "makhachkala",
      "distance_km": 450, "base_h": 11, "port": "makhachkala", "customs_h": 0},
+    # Enzeli (case-listed port) connected via conditional ferry + rail to Tehran.
+    {"id": "G-MAH-ENZ", "mode": "sea", "from": "makhachkala", "to": "enzeli",
+     "distance_km": 700, "base_h": 32, "sea": "caspian_west",
+     "sailing_interval_h": 72, "port": "enzeli", "customs_h": 4,
+     "conditional": True,
+     "note": "Условное плечо: линия Махачкала–Энзели не подтверждена как регулярная "
+             "(docs/RESEARCH.md); расстояние haversine×1.1, время — оценка."},
+    {"id": "G-ENZ-TEH", "mode": "rail", "from": "enzeli", "to": "tehran",
+     "distance_km": 340, "base_h": 10, "port": None, "customs_h": 0,
+     "note": "Ж/д Энзели–Тегеран через Решт; расстояние оценочное (горный маршрут)."},
 ]
 
 DOC_TYPES = {
