@@ -19,14 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import numpy as np
 
-from app import data, weather
+from app import data, store, weather
 
 MODE_RU = {"rail": "ж/д", "sea": "море", "road": "авто"}
-LEDGER_FILE = Path(__file__).parent / "data" / "ledger.json"
 CO2_METHOD = ("ISO 14083 / GLEC v3.2, well-to-wheel, default factors "
               "(DESNZ 2026); hub operations not included — no primary data")
 
@@ -235,86 +233,58 @@ def compare_routes(weight_t: float, storm: bool = False,
     return out
 
 
-# --- Shipments store: seed shipments + user-created ones (JSON file).
-SHIPMENTS_FILE = Path(__file__).parent / "data" / "shipments.json"
-
-
+# --- Shipments store: seed shipments + user-created ones (SQLite, see store.py).
 def _load_created_shipments() -> list[dict]:
-    try:
-        with open(SHIPMENTS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-
-def _save_created_shipments(rows: list[dict]) -> None:
-    SHIPMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(SHIPMENTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(rows, f, ensure_ascii=False, indent=1)
+    return store.list_shipments()
 
 
 def all_shipments() -> list[dict]:
-    return list(data.SHIPMENTS) + _load_created_shipments()
+    return list(data.SHIPMENTS) + store.list_shipments()
 
 
 def get_shipment_any(shipment_id: str) -> dict | None:
     s = data.get_shipment(shipment_id)
     if s is not None:
         return s
-    return next((x for x in _load_created_shipments() if x["id"] == shipment_id), None)
+    return store.get_shipment(shipment_id)
 
 
 def create_shipment(name: str, cargo: str, weight_t: float, route_id: str,
-                    docs: dict[str, str] | None = None) -> dict:
+                    docs: dict[str, str] | None = None,
+                    idempotency_key: str | None = None) -> dict:
     route = data.get_route(route_id)
     if route is None:
         raise ValueError(f"unknown route {route_id}")
-    rows = _load_created_shipments()
-    n = len(rows) + 1
-    sid = f"SHP-{2000 + n}"
     doc_types = list(data.DOC_TYPES.keys())
-    shipment = {
-        "id": sid, "name": name, "cargo": cargo, "weight_t": weight_t,
-        "route_id": route_id, "current_leg": 0, "status": "создан",
-        "eta": (datetime.now(timezone.utc) +
-                timedelta(hours=sum(l["base_h"] for l in route["legs"]))).isoformat(),
-        "docs": docs if docs is not None else {d: "pending" for d in doc_types[:4]},
-    }
-    rows.append(shipment)
-    _save_created_shipments(rows)
-    return shipment
+    eta = (datetime.now(timezone.utc) +
+           timedelta(hours=sum(l["base_h"] for l in route["legs"]))).isoformat()
+    return store.create_shipment_record(
+        name=name, cargo=cargo, weight_t=weight_t, route_id=route_id,
+        docs=docs if docs is not None else {d: "pending" for d in doc_types[:4]},
+        eta=eta, idempotency_key=idempotency_key)
 
 
 def clear_created_shipments() -> None:
-    _save_created_shipments([])
+    store.clear_shipments()
 
 
-# --- Pre-clearance ledger: append-only hash chain, persistent JSON file.
+# --- Pre-clearance ledger: append-only hash chain in SQLite (store.py).
 # Mechanics shown (hash link + tamper-evidence), not a production DLT.
 def _load_ledger() -> list[dict]:
-    try:
-        with open(LEDGER_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    return store.ledger_entries()
 
 
-def _save_ledger() -> None:
-    LEDGER_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(LEDGER_FILE, "w", encoding="utf-8") as f:
-        json.dump(LEDGER, f, ensure_ascii=False, indent=1)
-
-
-LEDGER: list[dict] = _load_ledger()
+def ledger_entries() -> list[dict]:
+    return store.ledger_entries()
 
 
 def clear_ledger() -> None:
-    LEDGER.clear()
-    _save_ledger()
+    store.clear_ledger()
 
 
 def ledger_last_hash() -> str:
-    return LEDGER[-1]["hash"] if LEDGER else "0" * 64
+    last = store.last_ledger_entry()
+    return last["hash"] if last else "0" * 64
 
 
 def submit_clearance(shipment_id: str, docs: dict[str, str]) -> dict:
@@ -327,34 +297,13 @@ def submit_clearance(shipment_id: str, docs: dict[str, str]) -> dict:
         json.dumps({"shipment": shipment_id, "docs": docs},
                    sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
-    prev = ledger_last_hash()
     decision = "pre-cleared" if not missing else "needs_documents"
-    payload = f"{prev}|{shipment_id}|{decision}|{doc_hash}"
-    entry = {
-        "seq": len(LEDGER) + 1,
-        "shipment_id": shipment_id,
-        "decision": decision,
-        "missing": missing,
-        "doc_hash": doc_hash,
-        "prev_hash": prev,
-        "hash": hashlib.sha256(payload.encode()).hexdigest(),
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-    LEDGER.append(entry)
-    _save_ledger()
-    return entry
+    return store.append_ledger_entry(
+        shipment_id=shipment_id, decision=decision, missing=missing, doc_hash=doc_hash)
 
 
 def verify_ledger() -> bool:
-    prev = "0" * 64
-    for e in LEDGER:
-        if e["prev_hash"] != prev:
-            return False
-        payload = f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|{e['doc_hash']}"
-        if hashlib.sha256(payload.encode()).hexdigest() != e["hash"]:
-            return False
-        prev = e["hash"]
-    return True
+    return store.verify_ledger()
 
 
 # --- Digital twin: event timeline for a shipment.
@@ -401,7 +350,7 @@ def shipment_timeline(shipment: dict, storm: bool = False) -> dict:
             "detail": ("узкое место" if leg["id"] == fc["bottleneck_leg_id"] else ""),
             "status": st,
         })
-    last = next((e for e in reversed(LEDGER) if e["shipment_id"] == shipment["id"]), None)
+    last = store.last_ledger_entry(shipment["id"])
     events.append({
         "time": start.isoformat(),
         "title": "Pre-clearance",

@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import data, graph, ml, model, weather
+from app import data, graph, ml, model, store, weather
 
 # Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
 # labelled in the UI); with it, POST endpoints require X-Write-Token.
@@ -225,10 +225,12 @@ class ShipmentCreate(BaseModel):
 
 
 @app.post("/api/shipments", status_code=201, dependencies=[Depends(guard_write)])
-def create_shipment(req: ShipmentCreate):
+def create_shipment(req: ShipmentCreate,
+                    idempotency_key: str | None = Header(None, max_length=100)):
     try:
         return model.create_shipment(req.name, req.cargo, req.weight_t,
-                                     req.route_id, req.docs)
+                                     req.route_id, req.docs,
+                                     idempotency_key=idempotency_key)
     except ValueError as e:
         raise HTTPException(404, str(e))
 
@@ -283,7 +285,13 @@ def clearance_submit(req: ClearanceRequest):
 
 @app.get("/api/clearance/ledger")
 def clearance_ledger():
-    return {"entries": model.LEDGER, "chain_valid": model.verify_ledger()}
+    return {"entries": model.ledger_entries(), "chain_valid": model.verify_ledger()}
+
+
+@app.post("/api/demo/reset", dependencies=[Depends(guard_write)])
+def demo_reset():
+    """Clear user-created runtime state (shipments + ledger). Seeds stay."""
+    return store.reset_demo()
 
 
 @app.get("/api/ml/info")
