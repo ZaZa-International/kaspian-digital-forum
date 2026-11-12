@@ -56,6 +56,18 @@ async def limit_body_size(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def revalidate_static(request: Request, call_next):
+    """Force browsers to revalidate the app shell, JS, CSS and the service
+    worker on every load (ETag/Last-Modified still allow 304). Prevents a
+    stale cached app.js from hiding fresh deployments behind the PWA cache."""
+    response = await call_next(request)
+    p = request.url.path
+    if p == "/" or p == "/sw.js" or p.endswith((".js", ".css", ".html")):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 def guard_write(request: Request, x_write_token: str | None = Header(None)) -> None:
     """Token (when configured) + per-IP write rate limit."""
     if WRITE_TOKEN and x_write_token != WRITE_TOKEN:

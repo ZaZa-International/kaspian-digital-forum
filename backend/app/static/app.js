@@ -61,13 +61,17 @@ function renderEtaDist(d) {
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Распределение ETA: спокойно и шторм">${yt}${bars}
     <line x1="${pc.toFixed(1)}" y1="${T}" x2="${pc.toFixed(1)}" y2="${T + ph}" stroke="var(--sea)" stroke-width="2" stroke-dasharray="5 4"/>
     <line x1="${ps.toFixed(1)}" y1="${T}" x2="${ps.toFixed(1)}" y2="${T + ph}" stroke="var(--bad)" stroke-width="2" stroke-dasharray="5 4"/>
-    <text x="${pc.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--sea)" text-anchor="middle">P90 ${d.calm.p90}</text>
-    <text x="${ps.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--bad)" text-anchor="middle">P90 ${d.storm.p90}</text>
+    <text x="${pc.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--sea)" text-anchor="middle">90%: ${d.calm.p90} ч</text>
+    <text x="${ps.toFixed(1)}" y="${T - 6}" font-size="11" fill="var(--bad)" text-anchor="middle">90%: ${d.storm.p90} ч</text>
     <line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--mut)"/>${xt}
-    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">ETA, ч</text></svg>`;
-  $("#eta-dist").innerHTML = `<div class="chart-head"><b>${esc(d.route_id)}</b> · цена шторма W1 = <b>${d.storm_price_h} ч</b>
-    <span class="legend"><i style="background:var(--sea)"></i>спокойно <i style="background:var(--bad)"></i>шторм · пунктир = P90</span></div>${svg}
-    <p class="hint">Monte Carlo ${d.n} прогонов на реальном архиве погоды (seed ${d.seed}). Сдвиг распределения вправо — цена шторма в часах. Симуляция, не эмпирические исходы рейсов.</p>`;
+    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">Время доставки, часы</text></svg>`;
+  $("#eta-dist").innerHTML = `<div class="chart-head"><b>${esc(d.route_id)}</b> · шторм добавляет ~<b>${d.storm_price_h} ч</b>
+    <span class="legend"><i style="background:var(--sea)"></i>обычная погода <i style="background:var(--bad)"></i>шторм</span></div>${svg}
+    <div class="explain">
+      <p>📊 <b>Что показано.</b> Мы прогнали ${d.n} вариантов погоды и загрузки порта. Каждый столбик — как часто груз приезжает за это время: синие — обычная погода, красные — шторм.</p>
+      <p>💡 <b>Что это значит для вас.</b> В шторм вся картинка сдвигается вправо — груз едет дольше. Пунктир — срок, в который вы успеваете в <b>9 случаях из 10</b>. Разница между синим и красным пунктиром (~${d.storm_price_h} ч) — это «цена шторма»: столько часов он добавляет к доставке этим маршрутом.</p>
+      <p class="tech">Метод: Monte Carlo на реальном архиве погоды Open-Meteo; «цена шторма» — расстояние Вассерштейна-1 между распределениями. Симуляция, не реальные рейсы.</p>
+    </div>`;
 }
 
 function renderPareto(points) {
@@ -82,18 +86,22 @@ function renderPareto(points) {
   const front = points.filter(p => p.pareto).sort((a, b) => a.time_h - b.time_h);
   const poly = front.map(p => `${X(p.time_h).toFixed(1)},${Y(p.cost_usd).toFixed(1)}`).join(" ");
   let dots = ""; points.forEach(p => {
-    dots += `<circle cx="${X(p.time_h).toFixed(1)}" cy="${Y(p.cost_usd).toFixed(1)}" r="${p.pareto ? 7 : 5}" fill="${co2Color(p.co2_kg, colo, cohi)}" stroke="${p.pareto ? 'var(--ink)' : 'none'}" stroke-width="2"><title>${esc(p.node_names.join(' → '))}\n${p.time_h} ч · $${p.cost_usd} · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · риск ${Math.round(p.risk * 100)}%${p.pareto ? ' · Парето-фронтир' : ''}</title></circle>`;
+    dots += `<circle cx="${X(p.time_h).toFixed(1)}" cy="${Y(p.cost_usd).toFixed(1)}" r="${p.pareto ? 7 : 5}" fill="${co2Color(p.co2_kg, colo, cohi)}" stroke="${p.pareto ? 'var(--ink)' : 'none'}" stroke-width="2"><title>${esc(p.node_names.join(' → '))}\n${p.time_h} ч · $${p.cost_usd} · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · риск срыва ${Math.round(p.risk * 100)}%${p.pareto ? ' · лучший компромисс' : ''}</title></circle>`;
   });
   let xt = ""; for (let k = 0; k <= 4; k++) { const t = tlo + (thi - tlo) * k / 4; xt += `<text x="${X(t).toFixed(1)}" y="${H - 14}" font-size="11" fill="var(--mut)" text-anchor="middle">${Math.round(t)}</text>`; }
   let yt = ""; for (let k = 0; k <= 3; k++) { const c = clo + (chi - clo) * k / 3; yt += `<line x1="${L}" y1="${Y(c).toFixed(1)}" x2="${W - R}" y2="${Y(c).toFixed(1)}" stroke="#e6edf1"/><text x="${L - 6}" y="${(Y(c) + 3).toFixed(1)}" font-size="11" fill="var(--mut)" text-anchor="end">$${Math.round(c)}</text>`; }
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Парето-фронтир: время, стоимость, CO2">${yt}
     <polyline points="${poly}" fill="none" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.6"/>${dots}
     <line x1="${L}" y1="${T + ph}" x2="${W - R}" y2="${T + ph}" stroke="var(--mut)"/>${xt}
-    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">Время в пути, ч →</text>
+    <text x="${L + pw / 2}" y="${H - 2}" font-size="11" fill="var(--mut)" text-anchor="middle">Время доставки, часы →</text>
     <text x="14" y="${T + ph / 2}" font-size="11" fill="var(--mut)" text-anchor="middle" transform="rotate(-90 14 ${T + ph / 2})">Стоимость, $ →</text></svg>`;
-  $("#pareto-chart").innerHTML = `<div class="chart-head"><b>${points.length}</b> кандидатов · <b>${front.length}</b> на фронтире
-    <span class="legend"><i style="background:var(--ok)"></i>меньше CO₂ <i style="background:var(--bad)"></i>больше CO₂ · обводка = фронтир</span></div>${svg}
-    <p class="hint">Фронтир — недоминируемые маршруты среди свипа целей время/стоимость/CO₂ (не глобальный перебор). Наведи на точку — детали маршрута.</p>`;
+  $("#pareto-chart").innerHTML = `<div class="chart-head"><b>${points.length}</b> вариантов маршрута · <b>${front.length}</b> лучших компромисса
+    <span class="legend"><i style="background:var(--ok)"></i>чище <i style="background:var(--bad)"></i>грязнее (CO₂) · обводка = лучший компромисс</span></div>${svg}
+    <div class="explain">
+      <p>📊 <b>Что показано.</b> Каждый кружок — отдельный маршрут. Левее — быстрее, ниже — дешевле, цвет — выбросы CO₂ (зелёный чище, красный грязнее).</p>
+      <p>💡 <b>Что это значит для вас.</b> Обведённые кружки — лучшие компромиссы: среди них нельзя сделать быстрее, не сделав дороже или грязнее. Выбирайте по тому, что важнее — срок, бюджет или экология. <b>Наведите на кружок</b> — увидите маршрут и цифры.</p>
+      <p class="tech">Метод: фронт Парето среди маршрутов, найденных по целям время/цена/CO₂ (не полный перебор всех путей).</p>
+    </div>`;
 }
 
 function renderAttribution(attr) {
@@ -103,7 +111,8 @@ function renderAttribution(attr) {
     const w = Math.abs(a.contribution_h) / mx * 100, col = a.contribution_h >= 0 ? 'var(--bad)' : 'var(--ok)', sign = a.contribution_h >= 0 ? '+' : '';
     return `<div class="attr-row"><span class="attr-lbl">${esc(FEAT_RU[a.feature] || a.feature)}</span><span class="attr-track"><i style="width:${w.toFixed(0)}%;background:${col}"></i></span><span class="attr-val">${sign}${a.contribution_h} ч</span></div>`;
   }).join("");
-  return `<div class="attr"><div class="attr-title">Вклад факторов в задержку (окклюзионная атрибуция):</div>${rows}</div>`;
+  return `<div class="attr"><div class="attr-title">Из чего складывается задержка (по часам):</div>${rows}
+    <div class="attr-note">Красные полоски добавляют часы к задержке, зелёные — уменьшают. Длина полоски = сколько часов добавил фактор.</div></div>`;
 }
 
 function renderGauge(ex) {
@@ -111,9 +120,13 @@ function renderGauge(ex) {
   const scaleMax = Math.max(ex.train_max, ex.l1_to_median) * 1.08 || 1;
   const thr = ex.train_p95 / scaleMax * 100, pos = Math.min(100, ex.l1_to_median / scaleMax * 100);
   const cls = ex.is_extrapolating ? 'high' : 'ok';
-  return `<div class="gauge-wrap"><div class="gauge-title">L1-расстояние до опыта модели <span class="pill ${cls}">${ex.is_extrapolating ? '⚠ экстраполяция' : 'в пределах опыта'}</span></div>
+  const note = ex.is_extrapolating
+    ? 'Маркер в красной зоне: шторм — редкая ситуация, модель такого почти не видела при обучении. Верьте объяснимому расчёту по правилам, а не ML-цифре.'
+    : 'Маркер в зелёной зоне: такая погода и загрузка часто встречались при обучении — прогнозу модели можно верить.';
+  return `<div class="gauge-wrap"><div class="gauge-title">Насколько ситуация знакома модели <span class="pill ${cls}">${ex.is_extrapolating ? '⚠ редкая ситуация — осторожно' : 'модель уверена'}</span></div>
     <div class="gauge"><i class="gauge-ok" style="width:${thr.toFixed(1)}%"></i><i class="gauge-bad" style="width:${(100 - thr).toFixed(1)}%"></i><span class="gauge-thr" style="left:${thr.toFixed(1)}%"></span><span class="gauge-marker" style="left:${pos.toFixed(1)}%"></span></div>
-    <div class="gauge-scale"><span>0</span><span>порог p95 = ${ex.train_p95}</span><span>текущий L1 = ${ex.l1_to_median}</span></div></div>`;
+    <div class="gauge-scale"><span>знакомо</span><span>граница опыта</span><span>сейчас</span></div>
+    <div class="gauge-note">${note}</div></div>`;
 }
 
 async function loadEtaDist() {
@@ -249,16 +262,17 @@ async function loadShipment() {
     `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
   const ex = mlp.extrapolation || {};
   const analogs = (mlp.analogs || []).map((a) =>
-    `волна ${a.max_wave_m} м, ветер ${a.max_wind_ms} м/с, порт ${a.max_congestion_pct}% → +${a.delay_h} ч (L1 ${a.l1})`).join("; ");
+    `волна ${a.max_wave_m} м, ветер ${a.max_wind_ms} м/с, порт ${a.max_congestion_pct}% → задержка +${a.delay_h} ч`).join("; ");
   $("#ml-box").innerHTML =
     renderGauge(ex) +
-    `🤖 <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
-    `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
-    `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
-    `Главные факторы глобально: ${esc(top)}. ` +
-    `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>` +
+    `🤖 <b>Прогноз задержки</b> (экспериментальная модель): <b>+${mlp.ml_delay_h} ч</b>. ` +
+    `Объяснимый расчёт по правилам коридора даёт <b>+${mlp.scoring_delay_h} ч</b>. ` +
+    (mlp.difference_h >= 10
+      ? `Расхождение ${mlp.difference_h} ч — модель и правила не согласны; в шторм доверяйте правилам: там каждый час подписан причиной.`
+      : `Расхождение всего ${mlp.difference_h} ч — модель и правила согласны, прогнозу можно верить.`) +
     renderAttribution(mlp.local_attribution) +
-    (analogs ? `<div class="hint analogs">Похожие сценарии (kNN по манхэттенскому L1, демо-аналоги — иллюстрация, не точный прогноз): ${esc(analogs)}.</div>` : "");
+    (analogs ? `<div class="analogs">📚 <b>Похожие прошлые случаи:</b> при такой же погоде и загрузке грузы задерживались на ${esc(analogs)}. Это ориентир из истории, не точный прогноз.</div>` : "") +
+    `<div class="tech">Модель обучена на смоделированных задержках (реальная погода Open-Meteo + правила коридора), не на реальных рейсах — это эксперимент. Ансамбль RandomForest + HistGradientBoosting.</div>`;
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
   const actualHtml = (tl.actual_events || []).map((e) => `
@@ -304,7 +318,7 @@ async function runSearch() {
     ${p.pareto_optimal ? " <span class='pill ok'>Парето (среди найденных)</span>" : ""}
     ${p.has_conditional_legs ? " <span class='pill medium'>есть условные плечи</span>" : ""}<br>
     <span class="hint">${p.modes.map((m) => MODE_RU[m]).join(" · ")}</span><br>
-    ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · P90 симуляции ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · индекс риска ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}<br><span class="hint">${esc(p.search_algorithm)} · раскрытий узлов: ${p.expansions_first_search}</span></div>`).join("")
+    ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · срок с запасом (90%) ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · риск срыва ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}<br><span class="hint">🔎 Кратчайший путь найден умным поиском; просмотрено узлов: ${p.expansions_first_search}.</span></div>`).join("")
     : `<p class="hint">Маршрутов нет — все пути заблокированы сценарием.</p>`;
   document.querySelectorAll("#search-results .path-card").forEach((card) => {
     card.addEventListener("click", () => {
@@ -381,10 +395,10 @@ async function runQuote() {
   const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}${scenarioQuery()}`);
   const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}`);
   $("#quote-result").textContent =
-    `${fc.route_name}: ${fc.total_predicted_h} ч = ход ${fc.total_base_h} ч` +
+    `${fc.route_name}: доставка ~${fc.total_predicted_h} ч (движение ${fc.total_base_h} ч` +
     (fc.total_wait_h ? ` + ожидание парома ${fc.total_wait_h} ч` : "") +
-    ` + задержки ${fc.delay_h} ч (индекс риска ${Math.round(fc.delay_probability * 100)}%, P90 симуляции ${fc.eta_p90_h} ч). ` +
-    `ML-прогноз: +${mlp.ml_delay_h} ч. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
+    ` + задержки ${fc.delay_h} ч). Риск срыва срока ${Math.round(fc.delay_probability * 100)}%, срок с запасом (90%) ${fc.eta_p90_h} ч. ` +
+    `Прогноз модели: +${mlp.ml_delay_h} ч задержки. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
     `стоимость ~$${fc.cost_usd.toLocaleString("ru-RU")}. ${fc.recommendation}`;
 }
 

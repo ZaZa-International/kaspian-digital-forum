@@ -1,7 +1,8 @@
 /* Offline cache for static assets only (never API responses).
-   v2: network-first for navigations (no stale index.html), cache-first
-   for versioned static assets, explicit offline fallback. */
-const CACHE = "sct-static-v2";
+   v5: network-first for the app shell (HTML, app.js, styles.css) so fresh
+   deployments are never hidden by a stale cache; cache-first for vendor
+   assets; explicit offline fallback. */
+const CACHE = "sct-static-v5";
 const ASSETS = ["/", "/static/styles.css", "/static/app.js",
                 "/static/manifest.json", "/static/icon-192.png", "/static/icon-512.png",
                 "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
@@ -31,6 +32,17 @@ self.addEventListener("fetch", (e) => {
         caches.open(CACHE).then((c) => c.put("/", copy));
         return resp;
       }).catch(() => caches.match("/"))
+    );
+    return;
+  }
+  if (url.pathname === "/static/app.js" || url.pathname === "/static/styles.css") {
+    // network-first: fresh app code when online, cached when offline
+    e.respondWith(
+      fetch(e.request).then((resp) => {
+        const copy = resp.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        return resp;
+      }).catch(() => caches.match(e.request))
     );
     return;
   }
