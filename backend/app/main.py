@@ -150,11 +150,13 @@ def graph_view():
 def routes_search(from_node: str = Query("moscow"), to_node: str = Query("bandar_abbas"),
                   weight_t: float = WEIGHT_Q, storm: bool = False,
                   objective: str = Query("time", pattern="^(time|cost|co2)$"),
-                  k: int = Query(3, ge=1, le=5), close: str = ""):
+                  k: int = Query(3, ge=1, le=5), close: str = "",
+                  extra_customs_h: float = CUSTOMS_Q,
+                  wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     try:
         paths = graph.k_shortest_paths(
             from_node, to_node, weight_t, storm,
-            _parse_scenario(close=close), objective, k)
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms), objective, k)
     except ValueError as e:
         raise HTTPException(404, str(e))
     return {"from": from_node, "to": to_node, "objective": objective,
@@ -179,9 +181,10 @@ def route_forecast(route_id: str, weight_t: float = WEIGHT_Q,
 
 @app.get("/api/compare")
 def compare(weight_t: float = WEIGHT_Q, storm: bool = False,
-            close: str = "", extra_customs_h: float = CUSTOMS_Q):
+            close: str = "", extra_customs_h: float = CUSTOMS_Q,
+            wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     rows = model.compare_routes(
-        weight_t, storm, _parse_scenario(close, extra_customs_h))
+        weight_t, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
     if not rows:
         raise HTTPException(422, "all routes blocked by scenario")
     best_time = min(rows, key=lambda r: r["total_predicted_h"])["route_id"]
@@ -192,11 +195,18 @@ def compare(weight_t: float = WEIGHT_Q, storm: bool = False,
 
 
 @app.get("/api/shipments")
-def shipments():
+def shipments(storm: bool = False, close: str = "",
+              extra_customs_h: float = CUSTOMS_Q,
+              wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+    scenario = _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
     out = []
     for s in model.all_shipments():
         route = data.get_route(s["route_id"])
-        fc = model.forecast_route(route, s["weight_t"])
+        try:
+            fc = model.forecast_route(route, s["weight_t"], storm, scenario)
+        except ValueError:
+            out.append({**s, "route_name": route["name"], "blocked": True})
+            continue
         out.append({**s, "route_name": route["name"],
                     "delay_h": fc["delay_h"],
                     "delay_probability": fc["delay_probability"],
@@ -236,27 +246,42 @@ def create_shipment(req: ShipmentCreate,
 
 
 @app.get("/api/shipments/{shipment_id}")
-def shipment_detail(shipment_id: str, storm: bool = False):
+def shipment_detail(shipment_id: str, storm: bool = False, close: str = "",
+                    extra_customs_h: float = CUSTOMS_Q,
+                    wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     route = data.get_route(s["route_id"])
-    return {**s, "route": route,
-            "forecast": model.forecast_route(route, s["weight_t"], storm),
-            "doc_types": data.DOC_TYPES}
+    try:
+        fc = model.forecast_route(
+            route, s["weight_t"], storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return {**s, "route": route, "forecast": fc, "doc_types": data.DOC_TYPES}
 
 
 @app.get("/api/shipments/{shipment_id}/timeline")
-def shipment_timeline(shipment_id: str, storm: bool = False):
+def shipment_timeline(shipment_id: str, storm: bool = False, close: str = "",
+                      extra_customs_h: float = CUSTOMS_Q,
+                      wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
-    return model.shipment_timeline(s, storm)
+    try:
+        return model.shipment_timeline(
+            s, storm, _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/api/exceptions")
-def exceptions(storm: bool = False):
-    return {"storm": storm, "exceptions": model.compute_exceptions(storm)}
+def exceptions(storm: bool = False, close: str = "",
+               extra_customs_h: float = CUSTOMS_Q,
+               wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
+    scenario = _parse_scenario(close, extra_customs_h, wave_m, wind_ms)
+    return {"storm": storm, "exceptions": model.compute_exceptions(storm, scenario)}
 
 
 class ClearanceRequest(BaseModel):

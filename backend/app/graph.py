@@ -74,11 +74,6 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
     if start in closed or goal in closed:
         return []
 
-    scenario = scenario or {}
-    closed = frozenset(scenario.get("closed_nodes", []))
-    if start in closed or goal in closed:
-        return []
-
     adj = _adjacency(closed)
     # Weighted adjacency copy (never mutates shared data): each edge
     # carries its forecast-based weight for the chosen objective.
@@ -134,7 +129,8 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
         legs = [p["_pred"] for p in path]
         total_pred = round(sum(l["predicted_h"] for l in legs), 1)
         total_base = sum(l["base_h"] for l in legs)
-        delay = round(total_pred - total_base, 1)
+        total_wait = round(sum(l.get("wait_h", 0) for l in legs), 1)
+        delay = round(total_pred - total_base - total_wait, 1)
         prob = min(0.95, delay / (delay + 18)) if delay > 0 else 0.05
         if storm and any(l["mode"] == "sea" for l in legs):
             prob = max(prob, 0.85)
@@ -150,6 +146,7 @@ def k_shortest_paths(start: str, goal: str, weight_t: float, storm: bool = False
                           [data.NODES[e["to"]]["name"] for e in path],
             "legs": legs,
             "total_base_h": total_base,
+            "total_wait_h": total_wait,
             "total_predicted_h": total_pred,
             "delay_h": delay,
             "delay_probability": round(prob, 2),

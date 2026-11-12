@@ -2,12 +2,13 @@
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = (s) => document.querySelector(s);
 let storm = false;
-let scenario = { close: "", extra_customs_h: 0 };
+let scenario = { close: "", extra_customs_h: 0, wave_m: null, wind_ms: null };
 let map, polylines = {};
 let shipments = [];
 let currentShipment = null;
 const MODE_RU = { rail: "🚂 ж/д", sea: "⛴ море", road: "🚛 авто" };
 const ROUTE_COLORS = { R1: "#0e7aa8", R2: "#1e7d46", R3: "#c96a12" };
+const fmtDT = (iso) => String(iso || "").slice(0, 16).replace("T", " ");
 
 async function getJSON(url, opts) {
   const r = await fetch(url, opts);
@@ -41,8 +42,10 @@ async function initMap() {
 
 function scenarioQuery() {
   const q = [];
-  if (scenario.close) q.push(`close=${scenario.close}`);
+  if (scenario.close) q.push(`close=${encodeURIComponent(scenario.close)}`);
   if (scenario.extra_customs_h) q.push(`extra_customs_h=${scenario.extra_customs_h}`);
+  if (scenario.wave_m != null) q.push(`wave_m=${scenario.wave_m}`);
+  if (scenario.wind_ms != null) q.push(`wind_ms=${scenario.wind_ms}`);
   return q.length ? "&" + q.join("&") : "";
 }
 
@@ -50,7 +53,7 @@ async function loadCompare() {
   const data = await getJSON(`/api/compare?weight_t=48&storm=${storm}${scenarioQuery()}`);
   $("#compare-table tbody").innerHTML = data.routes.map((r) => `
     <tr><td><b>${esc(r.route_id)}</b> ${esc(r.route_name)}<br><span class="hint">${esc(r.via)}</span></td>
-    <td>${r.total_predicted_h} ч</td><td>${r.eta_p90_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
+    <td>${r.total_predicted_h} ч${r.total_wait_h ? `<br><span class="hint">вкл. ожидание парома ${r.total_wait_h} ч</span>` : ""}</td><td>${r.eta_p90_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
     <td>${(r.co2_kg / 1000).toFixed(1)} т</td><td>$${esc(r.cost_usd.toLocaleString("ru-RU"))}</td>
     <td>${r.route_id === data.best.time ? "⏱ быстрее" : ""} ${r.route_id === data.best.co2 ? "🌱 чище" : ""} ${r.route_id === data.best.risk ? "🛡 надёжнее" : ""}</td></tr>`).join("");
   const best = data.routes.find((r) => r.route_id === data.best.co2);
@@ -61,33 +64,48 @@ async function loadCompare() {
 }
 
 async function loadShipments() {
-  const data = await getJSON("/api/shipments");
+  const data = await getJSON(`/api/shipments?storm=${storm}${scenarioQuery()}`);
   shipments = data.shipments;
   $("#kpi-ship").textContent = shipments.length;
-  const avg = shipments.reduce((s, x) => s + x.delay_h, 0) / shipments.length;
+  const withDelay = shipments.filter((s) => typeof s.delay_h === "number");
+  const avg = withDelay.length ? withDelay.reduce((s, x) => s + x.delay_h, 0) / withDelay.length : 0;
   $("#kpi-delay").textContent = `+${avg.toFixed(1)} ч`;
   $("#shipment-select").innerHTML = shipments.map((s) =>
-    `<option value="${esc(s.id)}">${esc(s.id)} — ${esc(s.name)} (${esc(s.route_name)})</option>`).join("");
-  currentShipment = shipments[0].id;
+    `<option value="${esc(s.id)}">${esc(s.id)} — ${esc(s.name)} (${esc(s.route_name)})${s.blocked ? " ⛔ заблокирован" : ""}</option>`).join("");
+  if (!shipments.some((s) => s.id === currentShipment)) currentShipment = shipments[0].id;
+  $("#shipment-select").value = currentShipment;
   await loadShipment();
 }
 
 async function loadShipment() {
-  const s = await getJSON(`/api/shipments/${currentShipment}?storm=${storm}`);
+  let s;
+  try {
+    s = await getJSON(`/api/shipments/${currentShipment}?storm=${storm}${scenarioQuery()}`);
+  } catch (e) {
+    $("#shipment-info").innerHTML =
+      `<b>${esc(currentShipment)}</b> — ⛔ маршрут заблокирован сценарием (закрыт узел на пути).`;
+    $("#timeline").innerHTML = "";
+    $("#events-timeline").innerHTML = "";
+    $("#docs-list").innerHTML = "";
+    $("#ml-box").textContent = "";
+    $("#verdict").textContent = "Прогноз недоступен: сбросьте сценарий или выберите другой маршрут.";
+    return;
+  }
   $("#shipment-info").innerHTML =
-    `<b>${esc(s.id)} · ${esc(s.name)}</b> — ${esc(s.cargo)}, ${s.weight_t} т · ${esc(s.status)} · ETA ${esc(s.eta)}`;
+    `<b>${esc(s.id)} · ${esc(s.name)}</b> — ${esc(s.cargo)}, ${s.weight_t} т · ${esc(s.status)} · ETA ${esc(fmtDT(s.eta))}`;
   const nameOf = {};
   (await getJSON("/api/nodes")).nodes.forEach((n) => (nameOf[n.id] = n.name));
   $("#timeline").innerHTML = s.forecast.legs.map((l) => `
     <li class="${l.id === s.forecast.bottleneck_leg_id ? "bottleneck" : ""}">
       <b>${MODE_RU[l.mode]} ${esc(nameOf[l.from])} → ${esc(nameOf[l.to])}</b>
       ${l.id === s.forecast.bottleneck_leg_id ? " ⚠ узкое место" : ""}<br>
-      план ${l.base_h} ч → прогноз ${l.predicted_h} ч (+${l.delay_h} ч)<br>
+      план ${l.base_h} ч${l.wait_h ? ` + ожидание парома ${l.wait_h} ч` : ""} → прогноз ${l.predicted_h} ч (+${l.delay_h} ч задержки)<br>
       <span class="why">${esc(l.reasons.join("; "))}</span>
     </li>`).join("");
   $("#verdict").textContent =
-    `Прогноз: ${s.forecast.total_predicted_h} ч вместо ${s.forecast.total_base_h} ч ` +
-    `(+${s.forecast.delay_h} ч). ${s.forecast.recommendation} CO₂ маршрута: ${(s.forecast.co2_kg / 1000).toFixed(1)} т.`;
+    `Прогноз: ${s.forecast.total_predicted_h} ч = ход ${s.forecast.total_base_h} ч` +
+    (s.forecast.total_wait_h ? ` + ожидание парома ${s.forecast.total_wait_h} ч` : "") +
+    ` + задержки ${s.forecast.delay_h} ч. ${s.forecast.recommendation} CO₂ маршрута: ${(s.forecast.co2_kg / 1000).toFixed(1)} т.`;
   const docLabel = { verified: "проверен", pending: "на проверке", missing: "нет документа" };
   $("#docs-list").innerHTML = Object.entries(s.docs).map(([k, v]) => `
     <li><span class="dot ${esc(v)}"></span><b>${esc(s.doc_types[k] || k)}</b> — ${esc(docLabel[v] || v)}</li>`).join("");
@@ -103,7 +121,7 @@ async function loadShipment() {
     `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
     `Главные факторы глобально: ${esc(top)}. ` +
     `<span class="hint">Обучена на реальных распределениях погоды (архив 90 дней); метки задержек — по правилам коридора.</span>`;
-  const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}`);
+  const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
   $("#events-timeline").innerHTML = tl.events.map((e) => `
     <li>${statusIcon[e.status] || ""} <b>${esc(e.title)}</b><br>
@@ -112,7 +130,7 @@ async function loadShipment() {
 }
 
 async function loadExceptions() {
-  const data = await getJSON(`/api/exceptions?storm=${storm}`);
+  const data = await getJSON(`/api/exceptions?storm=${storm}${scenarioQuery()}`);
   $("#exceptions-list").innerHTML = data.exceptions.length ? data.exceptions.map((e) => `
     <li class="exc ${esc(e.severity)}"><b>${e.severity === "high" ? "🔴" : "🟡"} ${esc(e.title)}</b><br>
     ${esc(e.detail)}<br><span class="action">→ ${esc(e.action)}</span></li>`).join("")
@@ -131,12 +149,18 @@ async function initSearch() {
 async function runSearch() {
   const from = $("#search-from").value, to = $("#search-to").value;
   const obj = $("#search-objective").value;
-  const data = await getJSON(`/api/routes/search?from_node=${from}&to_node=${to}&weight_t=48&storm=${storm}&objective=${obj}${scenarioQuery()}`);
+  let data;
+  try {
+    data = await getJSON(`/api/routes/search?from_node=${from}&to_node=${to}&weight_t=48&storm=${storm}&objective=${obj}${scenarioQuery()}`);
+  } catch (e) {
+    $("#search-results").innerHTML = `<p class="hint">Поиск не выполнен: ${esc(e.message)}. Проверьте параметры сценария.</p>`;
+    return;
+  }
   $("#search-results").innerHTML = data.paths.length ? data.paths.map((p, i) => `
     <div class="path-card"><b>${i + 1}. ${esc(p.node_names.join(" → "))}</b>
     ${p.pareto_optimal ? " <span class='pill ok'>Парето-оптимален</span>" : ""}<br>
     <span class="hint">${p.modes.map((m) => MODE_RU[m]).join(" · ")}</span><br>
-    ${p.total_predicted_h} ч (P90 ${p.eta_p90_h || "—"} ч) · +${p.delay_h} ч · риск ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}</div>`).join("")
+    ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · P90 симуляции ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · индекс риска ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}</div>`).join("")
     : `<p class="hint">Маршрутов нет — все пути заблокированы сценарием.</p>`;
 }
 
@@ -183,10 +207,26 @@ async function runQuote() {
   const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}${scenarioQuery()}`);
   const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}`);
   $("#quote-result").textContent =
-    `${fc.route_name}: ${fc.total_predicted_h} ч вместо ${fc.total_base_h} ч ` +
-    `(+${fc.delay_h} ч, риск срыва ${Math.round(fc.delay_probability * 100)}%, P90 ${fc.eta_p90_h} ч). ` +
+    `${fc.route_name}: ${fc.total_predicted_h} ч = ход ${fc.total_base_h} ч` +
+    (fc.total_wait_h ? ` + ожидание парома ${fc.total_wait_h} ч` : "") +
+    ` + задержки ${fc.delay_h} ч (индекс риска ${Math.round(fc.delay_probability * 100)}%, P90 симуляции ${fc.eta_p90_h} ч). ` +
     `ML-прогноз: +${mlp.ml_delay_h} ч. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
     `стоимость ~$${fc.cost_usd.toLocaleString("ru-RU")}. ${fc.recommendation}`;
+}
+
+async function refreshAll() {
+  await Promise.all([loadCompare(), loadShipments(), loadExceptions()]);
+  if ($("#search-results").children.length) await runSearch();
+}
+
+function readScenarioInputs() {
+  const wave = $("#scenario-wave").value, wind = $("#scenario-wind").value;
+  scenario = {
+    close: $("#scenario-close").value,
+    extra_customs_h: Math.max(0, +$("#scenario-customs").value || 0),
+    wave_m: wave === "" ? null : Math.max(0, +wave),
+    wind_ms: wind === "" ? null : Math.max(0, +wind),
+  };
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -203,19 +243,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("#storm-note").textContent = storm
       ? "Шторм: ветер 19 м/с, волна 3,4 м — паромы не выходят, пропуск рейса +48 ч."
       : "Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.";
-    await Promise.all([loadCompare(), loadShipment(), loadExceptions()]);
+    await refreshAll();
   });
   $("#search-btn").addEventListener("click", runSearch);
   $("#scenario-btn").addEventListener("click", async () => {
-    scenario = { close: $("#scenario-close").value,
-                 extra_customs_h: Math.max(0, +$("#scenario-customs").value || 0) };
-    await Promise.all([loadCompare(), runQuote(), loadExceptions()]);
+    readScenarioInputs();
+    await Promise.all([refreshAll(), runQuote()]);
   });
   $("#scenario-reset").addEventListener("click", async () => {
-    scenario = { close: "", extra_customs_h: 0 };
+    scenario = { close: "", extra_customs_h: 0, wave_m: null, wind_ms: null };
     $("#scenario-close").value = "";
     $("#scenario-customs").value = 0;
-    await Promise.all([loadCompare(), runQuote(), loadExceptions()]);
+    $("#scenario-wave").value = "";
+    $("#scenario-wind").value = "";
+    await Promise.all([refreshAll(), runQuote()]);
   });
   $("#shipment-select").addEventListener("change", (e) => {
     currentShipment = e.target.value;

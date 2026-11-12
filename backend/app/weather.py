@@ -98,11 +98,15 @@ def get_live_weather() -> dict:
 
 
 def current_sea_state(sea: str, storm: bool) -> dict:
-    """Wave/wind used by the delay model: storm override, else live."""
+    """Wave/wind used by the delay model: storm override, else live.
+    `source` documents provenance (storm scenario / live / demo fallback)."""
     if storm:
-        return {"wind_ms": data.STORM["wind_ms"], "wave_m": data.STORM["wave_m"]}
+        return {"wind_ms": data.STORM["wind_ms"], "wave_m": data.STORM["wave_m"],
+                "source": "storm scenario"}
     live = get_live_weather()["segments"].get(sea)
     if live:
-        return {"wind_ms": live["wind_ms"], "wave_m": live["wave_m"]}
+        return {"wind_ms": live["wind_ms"], "wave_m": live["wave_m"],
+                "source": live.get("source", "live: Open-Meteo")}
     w = data.WEATHER[sea]
-    return {"wind_ms": w["wind_ms"], "wave_m": w["wave_m"]}
+    return {"wind_ms": w["wind_ms"], "wave_m": w["wave_m"],
+            "source": "demo fallback (live unavailable)"}

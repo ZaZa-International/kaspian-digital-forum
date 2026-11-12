@@ -33,6 +33,29 @@ def _weather(sea: str, storm: bool) -> dict:
     return weather.current_sea_state(sea, storm)
 
 
+def _sea_weather(leg: dict, storm: bool, scenario: dict) -> dict:
+    """Single precedence rule for ALL endpoints and Monte Carlo:
+    explicit scenario wave/wind > storm preset > live/fallback weather.
+    Unspecified components keep the base value (wind-only works too)."""
+    base = _weather(leg["sea"], storm)
+    wave = scenario.get("wave_m")
+    wind = scenario.get("wind_ms")
+    if wave is None and wind is None:
+        return base
+    return {"wave_m": base["wave_m"] if wave is None else wave,
+            "wind_ms": base["wind_ms"] if wind is None else wind,
+            "source": "scenario override"}
+
+
+def _expected_wait_h(leg: dict) -> float:
+    """Expected ferry waiting: no fixed timetable on the Caspian, sailings
+    ~every 72 h -> uniform(0, interval) wait, mean interval/2. Assumption,
+    labelled as such; Monte Carlo samples the full uniform range."""
+    if leg["mode"] != "sea":
+        return 0.0
+    return round(leg.get("sailing_interval_h", 72) / 2, 1)
+
+
 def _delay_from_inputs(mode: str, wave: float, wind: float,
                        congestion_pct: int, customs_h: float) -> tuple[float, list[str]]:
     """Pure delay rules, shared by the point forecast and Monte Carlo."""
@@ -87,23 +110,26 @@ def predict_leg(leg: dict, storm: bool, scenario: dict | None = None) -> dict:
         cong = p["congestion_pct"] if p else 0
     customs = leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
     if mode == "sea":
-        if scenario.get("wave_m") is not None or scenario.get("wind_ms") is not None:
-            w = {"wave_m": scenario.get("wave_m", 1.0),
-                 "wind_ms": scenario.get("wind_ms", 10.0)}
-        else:
-            w = _weather(leg["sea"], storm)
+        w = _sea_weather(leg, storm, scenario)
         wave, wind = w["wave_m"], w["wind_ms"]
     else:
         wave, wind = 0.0, 0.0
     delay, reasons = _delay_from_inputs(mode, wave, wind, cong, customs)
-    out = {**leg, "predicted_h": round(leg["base_h"] + delay, 1),
-           "delay_h": delay, "reasons": reasons,
+    wait_h = _expected_wait_h(leg)
+    if wait_h:
+        reasons.insert(0, f"ожидание отправления парома ~{wait_h} ч "
+                          f"(интервал ~{leg.get('sailing_interval_h', 72)} ч, "
+                          f"расписания нет — допущение)")
+    out = {**leg, "predicted_h": round(leg["base_h"] + wait_h + delay, 1),
+           "wait_h": wait_h, "delay_h": delay, "reasons": reasons,
            "risk": "high" if delay >= 12 else "medium" if delay >= 5 else "low",
            "co2_kg": round(leg["distance_km"] * data.CO2_G_PER_TKM[mode] / 1000, 1),
            "cost_usd": round(leg["distance_km"] * data.COST_USD_PER_TKM[mode], 2)}
     if mode == "sea":
+        out["weather"] = {"wave_m": wave, "wind_ms": wind, "source": w["source"]}
         out["sailing_window"] = {
             "interval_h": leg.get("sailing_interval_h", 72),
+            "expected_wait_h": wait_h,
             "note": ("Рейсы по мере загрузки, без фиксированного расписания; "
                      "средний интервал ~72 ч, ожидание 1–2 дня — норма."),
         }
@@ -121,11 +147,16 @@ def _leg_weight_cost(leg: dict, weight_t: float) -> float:
 def simulate_route(route: dict, weight_t: float, storm: bool = False,
                    scenario: dict | None = None, n: int = 200,
                    seed: int = 7) -> dict:
-    """Monte Carlo ETA: sample wave/wind from the real 90-day archive,
-    congestion and customs around their values; return P50/P90/P95 of
-    total time and P(delay > 24h)."""
+    """Monte Carlo ETA. Samples: wave/wind from the real 90-day archive
+    (fixed under storm/scenario overrides — same precedence as predict_leg),
+    congestion ~ N(port, 8), customs ~ N(queue, 30%), ferry wait ~
+    Uniform(0, sailing_interval). Returns SIMULATION quantiles P50/P90/P95
+    of total time and P(delay > 24 h vs plan incl. expected wait).
+    These are not empirical probabilities of actual delivery."""
     scenario = scenario or {}
     rng = np.random.default_rng(seed)
+    base = sum(l["base_h"] for l in route["legs"])
+    expected_wait = sum(_expected_wait_h(l) for l in route["legs"])
     totals, delays = [], []
     for _ in range(n):
         total = 0.0
@@ -139,25 +170,30 @@ def simulate_route(route: dict, weight_t: float, storm: bool = False,
                 cong = int(np.clip(rng.normal(p["congestion_pct"], 8), 0, 100)) if p else 0
             customs = leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
             customs = float(np.clip(rng.normal(customs, max(1.0, customs * 0.3)), 0, None))
+            wait = 0.0
             if leg["mode"] == "sea":
-                if storm:
-                    wave, wind = data.STORM["wave_m"], data.STORM["wind_ms"]
-                elif scenario.get("wave_m") is not None:
-                    wave = scenario["wave_m"]
-                    wind = scenario.get("wind_ms", 10.0)
+                overridden = storm or scenario.get("wave_m") is not None \
+                    or scenario.get("wind_ms") is not None
+                if overridden:
+                    w = _sea_weather(leg, storm, scenario)
+                    wave, wind = w["wave_m"], w["wind_ms"]
                 else:
                     wave, wind = weather.bootstrap_sea_state(rng, leg["sea"])
+                wait = float(rng.uniform(0, leg.get("sailing_interval_h", 72)))
             else:
                 wave, wind = 0.0, 0.0
             d, _ = _delay_from_inputs(leg["mode"], wave, wind, cong, customs)
-            total += leg["base_h"] + d
-        base = sum(l["base_h"] for l in route["legs"])
+            total += leg["base_h"] + wait + d
         totals.append(total)
-        delays.append(total - base)
+        delays.append(total - base - expected_wait)
     totals = np.array(totals)
     delays = np.array(delays)
     return {
-        "n": n,
+        "n": n, "seed": seed,
+        "kind": "simulation quantiles (weather bootstrap + synthetic congestion/customs)",
+        "coverage_note": ("Квантили симуляции, не эмпирическая вероятность фактической "
+                          "доставки; фактических исходов рейсов в наборе данных нет"),
+        "expected_wait_h": round(expected_wait, 1),
         "eta_p50_h": round(float(np.percentile(totals, 50)), 1),
         "eta_p90_h": round(float(np.percentile(totals, 90)), 1),
         "eta_p95_h": round(float(np.percentile(totals, 95)), 1),
@@ -169,11 +205,12 @@ def forecast_route(route: dict, weight_t: float, storm: bool = False,
                    scenario: dict | None = None) -> dict:
     legs = [predict_leg(leg, storm, scenario) for leg in route["legs"]]
     total_base = sum(leg["base_h"] for leg in legs)
+    total_wait = round(sum(leg["wait_h"] for leg in legs), 1)
     total_pred = round(sum(leg["predicted_h"] for leg in legs), 1)
-    delay = round(total_pred - total_base, 1)
+    delay = round(total_pred - total_base - total_wait, 1)
     bottleneck = max(legs, key=lambda leg: leg["delay_h"])
-    # Delay probability: saturating curve. In a storm, sea routes get a
-    # high floor — land routes (no sea legs) keep their own probability.
+    # Heuristic risk index (NOT an empirical probability): saturating curve.
+    # In a storm, sea routes get a high floor — land routes keep their own.
     prob = min(0.95, delay / (delay + 18)) if delay > 0 else 0.05
     if storm and any(leg["mode"] == "sea" for leg in legs):
         prob = max(prob, 0.85)
@@ -192,8 +229,10 @@ def forecast_route(route: dict, weight_t: float, storm: bool = False,
     return {
         "route_id": route["id"], "route_name": route["name"],
         "storm": storm, "legs": legs,
-        "total_base_h": total_base, "total_predicted_h": total_pred,
+        "total_base_h": total_base, "total_wait_h": total_wait,
+        "total_predicted_h": total_pred,
         "delay_h": delay, "delay_probability": round(prob, 2),
+        "delay_probability_kind": "heuristic index (not an empirical probability)",
         "bottleneck_leg_id": bottleneck["id"],
         "co2_kg": co2_kg, "cost_usd": cost_usd,
         "co2_method": CO2_METHOD,
@@ -224,6 +263,7 @@ def compare_routes(weight_t: float, storm: bool = False,
             "route_id": fc["route_id"], "route_name": fc["route_name"],
             "via": route["via"],
             "total_predicted_h": fc["total_predicted_h"],
+            "total_wait_h": fc["total_wait_h"],
             "delay_h": fc["delay_h"],
             "delay_probability": fc["delay_probability"],
             "co2_kg": fc["co2_kg"], "cost_usd": fc["cost_usd"],
@@ -307,9 +347,10 @@ def verify_ledger() -> bool:
 
 
 # --- Digital twin: event timeline for a shipment.
-def shipment_timeline(shipment: dict, storm: bool = False) -> dict:
+def shipment_timeline(shipment: dict, storm: bool = False,
+                      scenario: dict | None = None) -> dict:
     route = data.get_route(shipment["route_id"])
-    fc = forecast_route(route, shipment["weight_t"], storm)
+    fc = forecast_route(route, shipment["weight_t"], storm, scenario)
     try:
         eta = datetime.fromisoformat(shipment["eta"])
     except ValueError:
@@ -330,7 +371,9 @@ def shipment_timeline(shipment: dict, storm: bool = False) -> dict:
             "predicted_time": t_pred.isoformat(),
             "title": (f"Отправление: {MODE_RU[leg['mode']]} "
                       f"{data.NODES[leg['from']]['name']} → {data.NODES[leg['to']]['name']}"),
-            "detail": f"план {leg['base_h']} ч, прогноз {leg['predicted_h']} ч (+{leg['delay_h']} ч)",
+            "detail": (f"план {leg['base_h']} ч"
+                       + (f" + ожидание парома {leg['wait_h']} ч" if leg.get("wait_h") else "")
+                       + f", прогноз {leg['predicted_h']} ч (+{leg['delay_h']} ч задержки)"),
             "status": st,
         })
         t_plan += timedelta(hours=leg["base_h"])
@@ -365,16 +408,20 @@ def shipment_timeline(shipment: dict, storm: bool = False) -> dict:
             "events": events}
 
 
-# --- Exceptions feed (project44-style): what is wrong, what to do.
-def compute_exceptions(storm: bool = False) -> list[dict]:
+# --- Exceptions feed (project44-style): event -> impact -> action.
+def compute_exceptions(storm: bool = False, scenario: dict | None = None) -> list[dict]:
+    scenario = scenario or {}
     out: list[dict] = []
     live = weather.get_live_weather()["segments"]
-    for seg_id, s in live.items():
-        if s["wave_m"] >= 2.0:
+    for seg_id, seg in data.SEA_SEGMENTS.items():
+        s = live.get(seg_id, seg)
+        wave = scenario.get("wave_m", s.get("wave_m", 0))
+        src = "сценарий" if scenario.get("wave_m") is not None else s.get("source", "demo")
+        if wave >= 2.0:
             out.append({
                 "severity": "high",
-                "title": f"Волна ≥ 2 м: {s['segment']}",
-                "detail": f"волна {s['wave_m']} м — паромы не выходят, следующий рейс не раньше чем через ~48 ч.",
+                "title": f"Волна ≥ 2 м: {seg['segment']} ({src})",
+                "detail": f"волна {wave} м — паромы не выходят, следующий рейс не раньше чем через ~48 ч.",
                 "action": "Перенаправьте грузы на сухопутный маршрут через Баку до улучшения погоды.",
             })
     if storm:
@@ -382,6 +429,20 @@ def compute_exceptions(storm: bool = False) -> list[dict]:
             "severity": "high", "title": "Шторм на Каспии (сценарий)",
             "detail": "Ветер 19 м/с, волна 3,4 м — все морские плечи остановлены.",
             "action": "Пересчитайте маршруты: сухопутный R3 становится самым надёжным.",
+        })
+    for node_id in scenario.get("closed_nodes", []):
+        out.append({
+            "severity": "high",
+            "title": f"Узел закрыт (сценарий): {data.NODES[node_id]['name']}",
+            "detail": "Все плечи через этот узел исключены из поиска и прогнозов.",
+            "action": "Перестройте маршрут: динамический поиск уже обходит закрытый узел.",
+        })
+    if scenario.get("customs_extra_h"):
+        out.append({
+            "severity": "medium",
+            "title": f"Доп. таможенная очередь +{scenario['customs_extra_h']} ч (сценарий)",
+            "detail": "Применяется ко всем плечам с таможней во всех прогнозах и сравнениях.",
+            "action": "Заложите резерв времени или подайте pre-clearance заранее.",
         })
     for pid, p in data.PORTS.items():
         if p["congestion_pct"] >= 60:
@@ -393,7 +454,16 @@ def compute_exceptions(storm: bool = False) -> list[dict]:
             })
     for s in all_shipments():
         route = data.get_route(s["route_id"])
-        fc = forecast_route(route, s["weight_t"], storm)
+        try:
+            fc = forecast_route(route, s["weight_t"], storm, scenario)
+        except ValueError:
+            out.append({
+                "severity": "high", "shipment_id": s["id"],
+                "title": f"{s['id']}: маршрут заблокирован сценарием",
+                "detail": f"Маршрут {route['id']} проходит через закрытый узел.",
+                "action": "Выберите альтернативный маршрут в динамическом поиске.",
+            })
+            continue
         missing = [d for d, v in s["docs"].items() if v == "missing"]
         if missing:
             out.append({
@@ -403,12 +473,12 @@ def compute_exceptions(storm: bool = False) -> list[dict]:
                 "action": "Загрузите недостающие документы до отправки.",
             })
         if fc["delay_probability"] >= 0.6:
-            others = [r for r in compare_routes(s["weight_t"], storm)
+            others = [r for r in compare_routes(s["weight_t"], storm, scenario)
                       if r["route_id"] != s["route_id"]]
             alt = min(others, key=lambda r: r["total_predicted_h"]) if others else None
             out.append({
                 "severity": "medium", "shipment_id": s["id"],
-                "title": (f"{s['id']}: риск срыва {round(fc['delay_probability'] * 100)}%, "
+                "title": (f"{s['id']}: индекс риска {round(fc['delay_probability'] * 100)}%, "
                           f"задержка +{fc['delay_h']} ч"),
                 "detail": fc["recommendation"],
                 "action": (f"Рассмотрите {alt['route_id']}: {alt['total_predicted_h']} ч "

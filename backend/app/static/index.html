@@ -41,15 +41,15 @@
     </div>
     <div id="map"></div>
     <table class="routes" id="compare-table">
-      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>P90 ETA*</th><th>Задержка</th><th>Риск срыва</th><th>CO₂</th><th>Стоимость**</th><th></th></tr></thead>
+      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>P90 симуляции*</th><th>Задержка</th><th>Индекс риска*</th><th>CO₂</th><th>Стоимость**</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="hint">* P90 ETA — время, которое не будет превышено в 90% сценариев (Monte Carlo, 200 прогонов по реальному архиву погоды). ** Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025: Актау–иранские порты $40–45/т). CO₂ по DESNZ 2026: ж/д 33 · паром RoRo 63 · авто 97 г/т-км.</p>
+    <p class="hint">* Индекс риска — эвристика по величине задержки, не эмпирическая вероятность. P90 — квантиль симуляции (Monte Carlo, 200 прогонов: волна/ветер из реального архива Open-Meteo, загруженность/таможня — синтетические вокруг демо-снимка), не гарантия фактической доставки. Время в пути = ход + ожидание парома (допущение: интервал ~72 ч, расписания нет) + задержки. ** Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025). CO₂ — оценка по DESNZ 2026 (UK proxy).</p>
   </section>
 
   <section class="card">
     <h2>🔍 Динамический поиск маршрута</h2>
-    <p class="hint">Не три заготовленных маршрута, а поиск по графу коридора (Дейкстра + Yen, k=3, Парето по времени/стоимости/CO₂).</p>
+    <p class="hint">Поиск по графу коридора (Дейкстра + Yen, k=3). Парето-метка — среди найденных кандидатов по времени/стоимости/CO₂ (эвристика, не глобальная оптимизация). Сценарий и шторм учитываются в весах рёбер.</p>
     <div class="sim-controls">
       <label>Откуда: <select id="search-from"></select></label>
       <label>Куда: <select id="search-to"></select></label>
@@ -93,10 +93,13 @@
           <option value="baku">Баку (узел закрыт)</option>
         </select>
       </label>
-      <label>Доп. таможня, ч: <input type="number" id="scenario-customs" min="0" max="72" value="0"></label>
+      <label>Доп. таможня, ч: <input type="number" id="scenario-customs" min="0" max="168" value="0"></label>
+      <label>Волна, м (0–15): <input type="number" id="scenario-wave" min="0" max="15" step="0.1" placeholder="авто"></label>
+      <label>Ветер, м/с (0–60): <input type="number" id="scenario-wind" min="0" max="60" step="1" placeholder="авто"></label>
       <button id="scenario-btn" class="primary">Применить сценарий</button>
       <button id="scenario-reset" class="storm-btn">Сбросить</button>
     </div>
+    <p class="hint">Сценарий применяется единообразно: сравнение, поиск, калькулятор, грузы, исключения и Monte Carlo. Явная волна/ветер переопределяет шторм и живую погоду; пустые поля — погода по источнику (live/демо).</p>
     <p class="verdict" id="quote-result">Выберите маршрут и вес — покажем время, задержку, ML-прогноз, CO₂ и стоимость.</p>
   </section>
 
