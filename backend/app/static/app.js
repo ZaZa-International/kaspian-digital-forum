@@ -107,6 +107,11 @@ async function loadShipment() {
   try {
     s = await getJSON(`/api/shipments/${currentShipment}?storm=${storm}${scenarioQuery()}`);
   } catch (e) {
+    if (String(e.message).includes("404")) {
+      // shipment vanished (e.g. demo reset) — reselect an existing one
+      await loadShipments();
+      return;
+    }
     $("#shipment-info").innerHTML =
       `<b>${esc(currentShipment)}</b> — ⛔ маршрут заблокирован сценарием (закрыт узел на пути).`;
     $("#timeline").innerHTML = "";
