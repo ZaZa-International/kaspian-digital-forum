@@ -346,6 +346,8 @@ async function loadShipment() {
     <li>${statusIcon[e.status] || ""}<b>${esc(e.title)}</b> <span class="hint">(модель)</span><br>
     <span class="hint">${esc(fmtDT(e.time))}${e.predicted_time ? " → прогноз " + esc(fmtDT(e.predicted_time)) : ""}</span><br>
     <span class="why">${esc(e.detail || "")}</span></li>`).join("");
+  const cur = shipments.find((s) => s.id === currentShipment);
+  if (cur) loadDocking(cur.route_id).catch(() => {});
 }
 
 async function loadExceptions() {
@@ -444,10 +446,84 @@ async function loadPorts() {
   const data = await getJSON("/api/ports");
   $("#ports-grid").innerHTML = data.ports.map((p) => {
     const cls = p.congestion_pct >= 60 ? "hot" : p.congestion_pct >= 45 ? "warm" : "";
-    return `<div class="port-card"><span class="port-name">${icon("anchor")}${esc(p.name)}</span>
+    const badge = p.live
+      ? `<span class="chip chip-ok port-badge">обновлено оператором, ${new Date(p.updated_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>`
+      : `<span class="chip port-badge port-badge-demo">демо-снимок</span>`;
+    return `<div class="port-card" data-port="${esc(p.node)}">
+      <div class="port-top"><span class="port-name">${icon("anchor")}${esc(p.name)}</span>${badge}</div>
       <div class="port-meta">загруженность ${p.congestion_pct}% · таможня ~${p.customs_queue_h} ч</div>
-      <div class="bar" role="img" aria-label="Загруженность ${p.congestion_pct}%"><i class="${cls}" style="width:${p.congestion_pct}%"></i></div></div>`;
+      <div class="bar" role="img" aria-label="Загруженность ${p.congestion_pct}%"><i class="${cls}" style="width:${p.congestion_pct}%"></i></div>
+      <form class="port-form" data-port="${esc(p.node)}">
+        <label class="field">Загрузка, %<input type="number" name="congestion_pct" min="0" max="100" value="${p.congestion_pct}" required inputmode="numeric"></label>
+        <label class="field">Таможня, ч<input type="number" name="customs_queue_h" min="0" step="0.5" value="${p.customs_queue_h}" required inputmode="decimal"></label>
+        <button class="btn btn-ghost btn-sm" type="submit">Обновить</button>
+      </form>
+    </div>`;
   }).join("");
+}
+
+/* П5: discrete-event rail–ferry docking card (twin section). */
+async function loadDocking(routeId) {
+  const el = $("#docking-card");
+  if (!el || !routeId) return;
+  try {
+    const d = await getJSON(`/api/routes/${routeId}/docking?weight_t=48&storm=${storm}${scenarioQuery()}`);
+    if (!d.has_connection) {
+      el.innerHTML = `<p class="hint">Нет стыковки ж/д–паром: маршрут сухопутный или без морского плеча.</p>`;
+      return;
+    }
+    const c = d.connections[0], ex = c.example;
+    const chip = c.p_miss >= 0.5 ? "chip-danger" : c.p_miss >= 0.2 ? "chip-warn" : "chip-ok";
+    el.innerHTML = `
+      <div class="docking-stats">
+        <div class="docking-stat"><span class="docking-num ${chip}">${Math.round(c.p_miss * 100)}%</span><span class="docking-lbl">шанс пропустить паром</span></div>
+        <div class="docking-stat"><span class="docking-num">${c.expected_wait_h} ч</span><span class="docking-lbl">среднее ожидание</span></div>
+        <div class="docking-stat"><span class="docking-num">${c.wait_p90_h} ч</span><span class="docking-lbl">ожидание с запасом (90%)</span></div>
+      </div>
+      <div class="docking-example ${ex.missed ? "is-miss" : "is-catch"}">
+        ${icon(ex.missed ? "alert" : "check-circle")}
+        <span><b>${esc(c.port_name)}:</b> поезд прибыл ${esc(ex.arrival_clock)}, паром ${esc(ex.departure_clock)} → ${esc(ex.verdict)}.</span>
+      </div>
+      <p class="hint">${esc(d.schedule_assumption)} Синхронизация настоящая (discrete-event): прибытие поезда сравнивается с расписанием парома и cutoff погрузки.</p>`;
+  } catch (e) {
+    el.innerHTML = `<p class="hint">Стыковка недоступна: ${esc(e.message)}</p>`;
+  }
+}
+
+/* П4: real local-EVM DLT anchor card (clearance section). */
+async function loadAnchor() {
+  const el = $("#dlt-anchor-card");
+  if (!el) return;
+  try {
+    const st = await getJSON("/api/clearance/anchor");
+    if (!st.available) {
+      el.innerHTML = `<p class="hint">DLT-якорь недоступен в этой сборке (нужны web3/eth-tester). Hash-chain реестр работает независимо.</p>`;
+      return;
+    }
+    const ledger = await getJSON("/api/clearance/ledger");
+    const lastHash = ledger.entries.length ? ledger.entries[ledger.entries.length - 1].hash : "0".repeat(64);
+    const l = st.latest;
+    const verified = l && l.root === lastHash;
+    el.innerHTML = `
+      <dl class="anchor-grid">
+        <div><dt>Контракт</dt><dd class="mono" title="${esc(st.contract_address)}">${esc(st.contract_address.slice(0, 10))}…${esc(st.contract_address.slice(-6))}</dd></div>
+        <div><dt>Якорей в цепочке</dt><dd>${st.anchored_count}</dd></div>
+        ${l ? `<div><dt>Последний якорь</dt><dd>seq ${l.seq} · root <span class="mono">${esc(l.root.slice(0, 16))}…</span></dd></div>` : ""}
+        <div><dt>Сверка с реестром</dt><dd>${l ? (verified ? '<span class="chip chip-ok">✓ verified on-chain</span>' : '<span class="chip chip-warn">якорь устарел — обновите</span>') : '<span class="hint">ещё не якорили</span>'}</dd></div>
+      </dl>
+      <button id="anchor-btn" class="btn btn-primary" type="button">${icon("ledger")}Якорить в реестр</button>
+      <p class="hint">${esc(st.note || "локальный EVM devnet (py-evm, in-memory), не mainnet/production")}. EVM, контракт и транзакции настоящие; корень hash-chain реестра фиксируется on-chain.</p>`;
+    $("#anchor-btn").addEventListener("click", () => withBusy($("#anchor-btn"), async () => {
+      try {
+        await getJSON("/api/clearance/anchor", { method: "POST", headers: { "Content-Type": "application/json" } });
+        await loadAnchor();
+      } catch (e) {
+        el.insertAdjacentHTML("beforeend", `<p class="hint">Не удалось заякорить: ${esc(e.message)}</p>`);
+      }
+    }));
+  } catch (e) {
+    el.innerHTML = `<p class="hint">DLT-якорь недоступен: ${esc(e.message)}</p>`;
+  }
 }
 
 async function loadLiveWeather() {
@@ -609,6 +685,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
       await loadShipment();
       await loadExceptions();
+      loadAnchor().catch(() => {});
       $("#clearance-result").textContent = res.decision === "pre-cleared"
         ? `Pre-clearance пройден (симуляция). Запись #${res.seq}, hash ${res.hash.slice(0, 16)}… Решение: ${res.issuer}, правила ${res.rule_version}.`
         : `Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы». Решение: ${res.issuer}.`;
@@ -616,5 +693,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       $("#clearance-result").textContent = "Ошибка pre-clearance: " + e.message;
     }
   }));
+  $("#ports-grid").addEventListener("submit", (e) => {
+    const form = e.target.closest(".port-form");
+    if (!form) return;
+    e.preventDefault();
+    const pid = form.dataset.port;
+    withBusy(form.querySelector("button"), async () => {
+      try {
+        await getJSON(`/api/ports/${pid}`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ congestion_pct: +form.congestion_pct.value, customs_queue_h: +form.customs_queue_h.value }),
+        });
+        await loadPorts();
+        await refreshAll();
+      } catch (err) {
+        form.title = "Не удалось обновить порт: " + err.message;
+      }
+    });
+  });
+  loadAnchor().catch(() => {});
   window.addEventListener("load", () => { if (map) map.invalidateSize(); });
 });

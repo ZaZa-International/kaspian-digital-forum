@@ -7,6 +7,7 @@ serialised with BEGIN IMMEDIATE. IDs come from a monotonic counter (never
 reused, even after a demo reset). Legacy JSON is migrated once and kept
 as *.migrated backup. Reset: POST /api/demo/reset or scripts/reset_demo_data.py.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -22,7 +23,9 @@ from pathlib import Path
 
 log = logging.getLogger("sct.store")
 
-_PREFERRED_DIR = Path(os.environ.get("SCT_DATA_DIR", str(Path(__file__).parent / "data")))
+_PREFERRED_DIR = Path(
+    os.environ.get("SCT_DATA_DIR", str(Path(__file__).parent / "data"))
+)
 
 
 def _writable(p: Path) -> bool:
@@ -43,9 +46,13 @@ else:
     # keep the demo writable, but label the fallback loudly in /api/health.
     DATA_DIR = Path(tempfile.gettempdir()) / "sct-data"
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    log.warning("SCT data dir %s is not writable; falling back to %s "
-                "(persistence across container recreation is NOT guaranteed). "
-                "Fix: chown the volume to the runtime user.", _PREFERRED_DIR, DATA_DIR)
+    log.warning(
+        "SCT data dir %s is not writable; falling back to %s "
+        "(persistence across container recreation is NOT guaranteed). "
+        "Fix: chown the volume to the runtime user.",
+        _PREFERRED_DIR,
+        DATA_DIR,
+    )
 DB_PATH = DATA_DIR / "sct.db"
 
 _SCHEMA = """
@@ -109,6 +116,14 @@ CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS port_updates (
+    port_id TEXT PRIMARY KEY,
+    congestion_pct INTEGER NOT NULL,
+    customs_queue_h REAL NOT NULL,
+    source TEXT NOT NULL,
+    note TEXT,
+    updated_at TEXT NOT NULL
+);
 INSERT OR IGNORE INTO counters (name, value) VALUES ('shipment', 2000);
 """
 
@@ -155,7 +170,11 @@ def _migrate_schema() -> None:
     """Add columns introduced after v1 to an existing database."""
     with sqlite3.connect(DB_PATH, timeout=15) as conn:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(ledger)")}
-        for col, ddl in (("issuer", "TEXT"), ("rule_version", "TEXT"), ("docs_json", "TEXT")):
+        for col, ddl in (
+            ("issuer", "TEXT"),
+            ("rule_version", "TEXT"),
+            ("docs_json", "TEXT"),
+        ):
             if col not in cols:
                 conn.execute(f"ALTER TABLE ledger ADD COLUMN {col} {ddl}")
 
@@ -179,16 +198,27 @@ def _migrate_legacy_shipments() -> None:
                 conn.execute(
                     "INSERT OR IGNORE INTO shipments (id,name,cargo,weight_t,route_id,"
                     "current_leg,status,eta,docs_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (r["id"], r["name"], r["cargo"], float(r["weight_t"]), r["route_id"],
-                     int(r.get("current_leg", 0)), r.get("status", "создан"), r["eta"],
-                     json.dumps(r.get("docs", {}), ensure_ascii=False),
-                     r.get("created_at", datetime.now(timezone.utc).isoformat())))
+                    (
+                        r["id"],
+                        r["name"],
+                        r["cargo"],
+                        float(r["weight_t"]),
+                        r["route_id"],
+                        int(r.get("current_leg", 0)),
+                        r.get("status", "создан"),
+                        r["eta"],
+                        json.dumps(r.get("docs", {}), ensure_ascii=False),
+                        r.get("created_at", datetime.now(timezone.utc).isoformat()),
+                    ),
+                )
                 num = int(str(r["id"]).split("-")[-1])
                 max_num = max(max_num, num)
             except (KeyError, ValueError, TypeError):
                 continue
-        conn.execute("UPDATE counters SET value=? WHERE name='shipment' AND value<?",
-                     (max_num, max_num))
+        conn.execute(
+            "UPDATE counters SET value=? WHERE name='shipment' AND value<?",
+            (max_num, max_num),
+        )
     legacy.rename(DATA_DIR / "shipments.json.migrated")
 
 
@@ -210,19 +240,34 @@ def _migrate_legacy_ledger() -> None:
                 conn.execute(
                     "INSERT OR IGNORE INTO ledger (seq,shipment_id,decision,missing_json,"
                     "doc_hash,prev_hash,hash,ts) VALUES (?,?,?,?,?,?,?,?)",
-                    (int(r["seq"]), r["shipment_id"], r["decision"],
-                     json.dumps(r.get("missing", []), ensure_ascii=False),
-                     r["doc_hash"], r["prev_hash"], r["hash"], r["ts"]))
+                    (
+                        int(r["seq"]),
+                        r["shipment_id"],
+                        r["decision"],
+                        json.dumps(r.get("missing", []), ensure_ascii=False),
+                        r["doc_hash"],
+                        r["prev_hash"],
+                        r["hash"],
+                        r["ts"],
+                    ),
+                )
             except (KeyError, ValueError, TypeError):
                 continue
     legacy.rename(DATA_DIR / "ledger.json.migrated")
 
 
 def _shipment_dict(r: sqlite3.Row) -> dict:
-    return {"id": r["id"], "name": r["name"], "cargo": r["cargo"],
-            "weight_t": r["weight_t"], "route_id": r["route_id"],
-            "current_leg": r["current_leg"], "status": r["status"],
-            "eta": r["eta"], "docs": json.loads(r["docs_json"])}
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "cargo": r["cargo"],
+        "weight_t": r["weight_t"],
+        "route_id": r["route_id"],
+        "current_leg": r["current_leg"],
+        "status": r["status"],
+        "eta": r["eta"],
+        "docs": json.loads(r["docs_json"]),
+    }
 
 
 def list_shipments() -> list[dict]:
@@ -233,20 +278,31 @@ def list_shipments() -> list[dict]:
 
 def get_shipment(shipment_id: str) -> dict | None:
     with _conn() as conn:
-        r = conn.execute("SELECT * FROM shipments WHERE id=?", (shipment_id,)).fetchone()
+        r = conn.execute(
+            "SELECT * FROM shipments WHERE id=?", (shipment_id,)
+        ).fetchone()
     return _shipment_dict(r) if r else None
 
 
-def create_shipment_record(*, name: str, cargo: str, weight_t: float, route_id: str,
-                           docs: dict, eta: str, status: str = "создан",
-                           idempotency_key: str | None = None) -> dict:
+def create_shipment_record(
+    *,
+    name: str,
+    cargo: str,
+    weight_t: float,
+    route_id: str,
+    docs: dict,
+    eta: str,
+    status: str = "создан",
+    idempotency_key: str | None = None,
+) -> dict:
     """Insert atomically; monotonic ID; idempotency key returns prior row."""
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         if idempotency_key:
-            r = conn.execute("SELECT * FROM shipments WHERE idempotency_key=?",
-                             (idempotency_key,)).fetchone()
+            r = conn.execute(
+                "SELECT * FROM shipments WHERE idempotency_key=?", (idempotency_key,)
+            ).fetchone()
             if r:
                 conn.rollback()
                 return _shipment_dict(r)
@@ -258,12 +314,31 @@ def create_shipment_record(*, name: str, cargo: str, weight_t: float, route_id: 
         conn.execute(
             "INSERT INTO shipments (id,name,cargo,weight_t,route_id,current_leg,status,"
             "eta,docs_json,idempotency_key,created_at) VALUES (?,?,?,?,?,0,?,?,?,?,?)",
-            (sid, name, cargo, weight_t, route_id, status, eta,
-             json.dumps(docs, ensure_ascii=False), idempotency_key, now))
+            (
+                sid,
+                name,
+                cargo,
+                weight_t,
+                route_id,
+                status,
+                eta,
+                json.dumps(docs, ensure_ascii=False),
+                idempotency_key,
+                now,
+            ),
+        )
         conn.commit()
-        return {"id": sid, "name": name, "cargo": cargo, "weight_t": weight_t,
-                "route_id": route_id, "current_leg": 0, "status": status,
-                "eta": eta, "docs": docs}
+        return {
+            "id": sid,
+            "name": name,
+            "cargo": cargo,
+            "weight_t": weight_t,
+            "route_id": route_id,
+            "current_leg": 0,
+            "status": status,
+            "eta": eta,
+            "docs": docs,
+        }
     except BaseException:
         conn.rollback()
         raise
@@ -277,11 +352,19 @@ def clear_shipments() -> None:
 
 
 def _ledger_dict(r: sqlite3.Row) -> dict:
-    return {"seq": r["seq"], "shipment_id": r["shipment_id"], "decision": r["decision"],
-            "missing": json.loads(r["missing_json"]), "doc_hash": r["doc_hash"],
-            "prev_hash": r["prev_hash"], "hash": r["hash"], "ts": r["ts"],
-            "issuer": r["issuer"], "rule_version": r["rule_version"],
-            "docs": json.loads(r["docs_json"]) if r["docs_json"] else None}
+    return {
+        "seq": r["seq"],
+        "shipment_id": r["shipment_id"],
+        "decision": r["decision"],
+        "missing": json.loads(r["missing_json"]),
+        "doc_hash": r["doc_hash"],
+        "prev_hash": r["prev_hash"],
+        "hash": r["hash"],
+        "ts": r["ts"],
+        "issuer": r["issuer"],
+        "rule_version": r["rule_version"],
+        "docs": json.loads(r["docs_json"]) if r["docs_json"] else None,
+    }
 
 
 def ledger_entries() -> list[dict]:
@@ -293,24 +376,36 @@ def ledger_entries() -> list[dict]:
 def last_ledger_entry(shipment_id: str | None = None) -> dict | None:
     with _conn() as conn:
         if shipment_id:
-            r = conn.execute("SELECT * FROM ledger WHERE shipment_id=? "
-                             "ORDER BY seq DESC LIMIT 1", (shipment_id,)).fetchone()
+            r = conn.execute(
+                "SELECT * FROM ledger WHERE shipment_id=? ORDER BY seq DESC LIMIT 1",
+                (shipment_id,),
+            ).fetchone()
         else:
-            r = conn.execute("SELECT * FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
+            r = conn.execute(
+                "SELECT * FROM ledger ORDER BY seq DESC LIMIT 1"
+            ).fetchone()
     return _ledger_dict(r) if r else None
 
 
-def append_ledger_entry(*, shipment_id: str, decision: str, missing: list[str],
-                        doc_hash: str, issuer: str | None = None,
-                        rule_version: str | None = None,
-                        docs_snapshot: list[dict] | None = None) -> dict:
+def append_ledger_entry(
+    *,
+    shipment_id: str,
+    decision: str,
+    missing: list[str],
+    doc_hash: str,
+    issuer: str | None = None,
+    rule_version: str | None = None,
+    docs_snapshot: list[dict] | None = None,
+) -> dict:
     """Hash-chain append inside one write transaction: seq, prev_hash and
     hash are computed atomically, so concurrent submits cannot fork the chain.
     The hash covers decision + document snapshot + issuer + rule version."""
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
-        prev_row = conn.execute("SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
+        prev_row = conn.execute(
+            "SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1"
+        ).fetchone()
         prev = prev_row["hash"] if prev_row else "0" * 64
         payload = f"{prev}|{shipment_id}|{decision}|{doc_hash}|{rule_version}|{issuer}"
         h = hashlib.sha256(payload.encode()).hexdigest()
@@ -318,14 +413,35 @@ def append_ledger_entry(*, shipment_id: str, decision: str, missing: list[str],
         cur = conn.execute(
             "INSERT INTO ledger (shipment_id,decision,missing_json,doc_hash,prev_hash,hash,ts,"
             "issuer,rule_version,docs_json) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (shipment_id, decision, json.dumps(missing, ensure_ascii=False),
-             doc_hash, prev, h, ts, issuer, rule_version,
-             json.dumps(docs_snapshot, ensure_ascii=False) if docs_snapshot is not None else None))
+            (
+                shipment_id,
+                decision,
+                json.dumps(missing, ensure_ascii=False),
+                doc_hash,
+                prev,
+                h,
+                ts,
+                issuer,
+                rule_version,
+                json.dumps(docs_snapshot, ensure_ascii=False)
+                if docs_snapshot is not None
+                else None,
+            ),
+        )
         conn.commit()
-        return {"seq": cur.lastrowid, "shipment_id": shipment_id, "decision": decision,
-                "missing": missing, "doc_hash": doc_hash, "prev_hash": prev,
-                "hash": h, "ts": ts, "issuer": issuer, "rule_version": rule_version,
-                "docs": docs_snapshot}
+        return {
+            "seq": cur.lastrowid,
+            "shipment_id": shipment_id,
+            "decision": decision,
+            "missing": missing,
+            "doc_hash": doc_hash,
+            "prev_hash": prev,
+            "hash": h,
+            "ts": ts,
+            "issuer": issuer,
+            "rule_version": rule_version,
+            "docs": docs_snapshot,
+        }
     except BaseException:
         conn.rollback()
         raise
@@ -345,10 +461,14 @@ def verify_ledger() -> bool:
             return False
         if e["rule_version"] is None and e["issuer"] is None:
             # legacy v1 entry (pre-provenance): original payload format
-            payload = f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|{e['doc_hash']}"
+            payload = (
+                f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|{e['doc_hash']}"
+            )
         else:
-            payload = (f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|"
-                       f"{e['doc_hash']}|{e['rule_version']}|{e['issuer']}")
+            payload = (
+                f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|"
+                f"{e['doc_hash']}|{e['rule_version']}|{e['issuer']}"
+            )
         if hashlib.sha256(payload.encode()).hexdigest() != e["hash"]:
             return False
         prev = e["hash"]
@@ -360,22 +480,44 @@ DOC_STATUSES = ("missing", "submitted", "verified", "rejected", "expired", "unkn
 
 
 def _doc_dict(r: sqlite3.Row) -> dict:
-    return {k: r[k] for k in ("shipment_id", "doc_type", "status", "ref", "content_hash",
-                              "issuer", "source", "note", "rule_version",
-                              "submitted_at", "decided_at")}
+    return {
+        k: r[k]
+        for k in (
+            "shipment_id",
+            "doc_type",
+            "status",
+            "ref",
+            "content_hash",
+            "issuer",
+            "source",
+            "note",
+            "rule_version",
+            "submitted_at",
+            "decided_at",
+        )
+    }
 
 
 def get_documents(shipment_id: str) -> list[dict]:
     with _conn() as conn:
-        rows = conn.execute("SELECT * FROM documents WHERE shipment_id=? ORDER BY doc_type",
-                            (shipment_id,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM documents WHERE shipment_id=? ORDER BY doc_type",
+            (shipment_id,),
+        ).fetchall()
     return [_doc_dict(r) for r in rows]
 
 
-def upsert_document(shipment_id: str, doc_type: str, *, status: str,
-                    ref: str | None = None, issuer: str | None = None,
-                    source: str | None = None, note: str | None = None,
-                    rule_version: str | None = None) -> dict:
+def upsert_document(
+    shipment_id: str,
+    doc_type: str,
+    *,
+    status: str,
+    ref: str | None = None,
+    issuer: str | None = None,
+    source: str | None = None,
+    note: str | None = None,
+    rule_version: str | None = None,
+) -> dict:
     if status not in DOC_STATUSES:
         raise ValueError(f"invalid document status {status}")
     now = datetime.now(timezone.utc).isoformat()
@@ -383,8 +525,10 @@ def upsert_document(shipment_id: str, doc_type: str, *, status: str,
     submitted_at = now if status == "submitted" else None
     decided_at = now if status in ("verified", "rejected", "expired") else None
     with _conn() as conn:
-        prev = conn.execute("SELECT submitted_at FROM documents WHERE shipment_id=? AND doc_type=?",
-                            (shipment_id, doc_type)).fetchone()
+        prev = conn.execute(
+            "SELECT submitted_at FROM documents WHERE shipment_id=? AND doc_type=?",
+            (shipment_id, doc_type),
+        ).fetchone()
         if submitted_at is None and prev:
             submitted_at = prev["submitted_at"]
         conn.execute(
@@ -394,8 +538,20 @@ def upsert_document(shipment_id: str, doc_type: str, *, status: str,
             "ref=excluded.ref, content_hash=excluded.content_hash, issuer=excluded.issuer, "
             "source=excluded.source, note=excluded.note, rule_version=excluded.rule_version, "
             "submitted_at=excluded.submitted_at, decided_at=excluded.decided_at",
-            (shipment_id, doc_type, status, ref, content_hash, issuer, source, note,
-             rule_version, submitted_at, decided_at))
+            (
+                shipment_id,
+                doc_type,
+                status,
+                ref,
+                content_hash,
+                issuer,
+                source,
+                note,
+                rule_version,
+                submitted_at,
+                decided_at,
+            ),
+        )
     return next(d for d in get_documents(shipment_id) if d["doc_type"] == doc_type)
 
 
@@ -405,17 +561,38 @@ def clear_documents() -> None:
 
 
 # --- Shipment events (DCSA T&T-inspired): actual facts vs model timeline.
-EVENT_TYPES = ("departure", "arrival", "gate_in", "gate_out", "load", "discharge",
-               "customs_start", "customs_done", "delay", "note")
+EVENT_TYPES = (
+    "departure",
+    "arrival",
+    "gate_in",
+    "gate_out",
+    "load",
+    "discharge",
+    "customs_start",
+    "customs_done",
+    "delay",
+    "note",
+)
 
 
-def add_event(*, shipment_id: str, event_type: str, leg_id: str | None = None,
-              planned_ts: str | None = None, actual_ts: str | None = None,
-              occurred_ts: str | None = None, source: str,
-              location: str | None = None, mode: str | None = None,
-              confidence: str | None = None, note: str | None = None,
-              correction_of: str | None = None, event_id: str | None = None) -> dict:
+def add_event(
+    *,
+    shipment_id: str,
+    event_type: str,
+    leg_id: str | None = None,
+    planned_ts: str | None = None,
+    actual_ts: str | None = None,
+    occurred_ts: str | None = None,
+    source: str,
+    location: str | None = None,
+    mode: str | None = None,
+    confidence: str | None = None,
+    note: str | None = None,
+    correction_of: str | None = None,
+    event_id: str | None = None,
+) -> dict:
     import uuid
+
     if event_type not in EVENT_TYPES:
         raise ValueError(f"invalid event_type {event_type}")
     eid = event_id or uuid.uuid4().hex
@@ -425,25 +602,99 @@ def add_event(*, shipment_id: str, event_type: str, leg_id: str | None = None,
             "INSERT INTO events (id,shipment_id,leg_id,event_type,planned_ts,actual_ts,"
             "occurred_ts,received_ts,source,location,mode,confidence,note,correction_of) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (eid, shipment_id, leg_id, event_type, planned_ts, actual_ts, occurred_ts,
-             received, source, location, mode, confidence, note, correction_of))
-    return {"id": eid, "shipment_id": shipment_id, "leg_id": leg_id,
-            "event_type": event_type, "planned_ts": planned_ts, "actual_ts": actual_ts,
-            "occurred_ts": occurred_ts, "received_ts": received, "source": source,
-            "location": location, "mode": mode, "confidence": confidence,
-            "note": note, "correction_of": correction_of}
+            (
+                eid,
+                shipment_id,
+                leg_id,
+                event_type,
+                planned_ts,
+                actual_ts,
+                occurred_ts,
+                received,
+                source,
+                location,
+                mode,
+                confidence,
+                note,
+                correction_of,
+            ),
+        )
+    return {
+        "id": eid,
+        "shipment_id": shipment_id,
+        "leg_id": leg_id,
+        "event_type": event_type,
+        "planned_ts": planned_ts,
+        "actual_ts": actual_ts,
+        "occurred_ts": occurred_ts,
+        "received_ts": received,
+        "source": source,
+        "location": location,
+        "mode": mode,
+        "confidence": confidence,
+        "note": note,
+        "correction_of": correction_of,
+    }
 
 
 def list_events(shipment_id: str) -> list[dict]:
     with _conn() as conn:
-        rows = conn.execute("SELECT * FROM events WHERE shipment_id=? "
-                            "ORDER BY COALESCE(occurred_ts, received_ts)", (shipment_id,)).fetchall()
+        rows = conn.execute(
+            "SELECT * FROM events WHERE shipment_id=? "
+            "ORDER BY COALESCE(occurred_ts, received_ts)",
+            (shipment_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
 def clear_events() -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM events")
+
+
+# --- Port congestion updates: operator-reported live overlay on the demo
+# snapshot. No open live port feed exists; provenance is stored per row.
+def set_port_update(
+    port_id: str,
+    congestion_pct: int,
+    customs_queue_h: float,
+    source: str = "operator-reported",
+    note: str | None = None,
+) -> dict:
+    """Upsert a port congestion/customs update; overrides the demo snapshot."""
+    if not 0 <= congestion_pct <= 100:
+        raise ValueError(f"congestion_pct must be 0..100, got {congestion_pct}")
+    if customs_queue_h < 0:
+        raise ValueError(f"customs_queue_h must be >= 0, got {customs_queue_h}")
+    now = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO port_updates (port_id,congestion_pct,customs_queue_h,source,note,"
+            "updated_at) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(port_id) DO UPDATE SET congestion_pct=excluded.congestion_pct, "
+            "customs_queue_h=excluded.customs_queue_h, source=excluded.source, "
+            "note=excluded.note, updated_at=excluded.updated_at",
+            (port_id, int(congestion_pct), float(customs_queue_h), source, note, now),
+        )
+    return {
+        "port_id": port_id,
+        "congestion_pct": int(congestion_pct),
+        "customs_queue_h": float(customs_queue_h),
+        "source": source,
+        "note": note,
+        "updated_at": now,
+    }
+
+
+def get_port_updates() -> dict[str, dict]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM port_updates ORDER BY port_id").fetchall()
+    return {r["port_id"]: dict(r) for r in rows}
+
+
+def clear_port_updates() -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM port_updates")
 
 
 def status() -> dict:
@@ -454,9 +705,11 @@ def status() -> dict:
         out = {"ok": True, "path": str(DB_PATH)}
         if DATA_DIR != _PREFERRED_DIR:
             out["fallback"] = True
-            out["warning"] = (f"preferred dir {_PREFERRED_DIR} not writable; using {DATA_DIR}. "
-                              "Persistence across container recreation not guaranteed — "
-                              "chown the volume to the runtime user.")
+            out["warning"] = (
+                f"preferred dir {_PREFERRED_DIR} not writable; using {DATA_DIR}. "
+                "Persistence across container recreation not guaranteed — "
+                "chown the volume to the runtime user."
+            )
         return out
     except Exception as e:  # noqa: BLE001 - diagnostic surface
         return {"ok": False, "path": str(DB_PATH), "error": f"{type(e).__name__}: {e}"}
@@ -471,4 +724,5 @@ def reset_demo() -> dict:
         conn.execute("DELETE FROM ledger")
         conn.execute("DELETE FROM documents")
         conn.execute("DELETE FROM events")
+        conn.execute("DELETE FROM port_updates")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import data, graph, ml, model, store, weather
+from app import anchor, data, docking, graph, ml, model, store, weather
 
 # Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
 # labelled in the UI); with it, POST endpoints require X-Write-Token.
@@ -102,7 +102,7 @@ def nodes():
 @app.get("/api/ports")
 def ports():
     out = []
-    for pid, p in data.PORTS.items():
+    for pid, p in data.get_ports_live().items():
         out.append(
             {
                 **p,
@@ -112,6 +112,31 @@ def ports():
             }
         )
     return {"ports": out}
+
+
+class PortUpdate(BaseModel):
+    congestion_pct: int = Field(ge=0, le=100)
+    customs_queue_h: float = Field(ge=0)
+    note: str | None = Field(None, max_length=300)
+
+
+@app.post("/api/ports/{port_id}", dependencies=[Depends(guard_write)])
+def port_update(port_id: str, body: PortUpdate):
+    """Operator-reported live congestion (no open official feed exists).
+    Overrides the demo snapshot for the model; provenance = operator-reported."""
+    if port_id not in data.PORTS:
+        raise HTTPException(404, f"unknown port {port_id}")
+    try:
+        store.set_port_update(
+            port_id,
+            body.congestion_pct,
+            body.customs_queue_h,
+            source="operator-reported",
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    return data.get_port(port_id)
 
 
 @app.get("/api/weather")
@@ -291,6 +316,31 @@ def route_eta_distribution(
         return model.eta_distribution(
             route,
             weight_t,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        )
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/routes/{route_id}/docking")
+def route_docking(
+    route_id: str,
+    weight_t: float = WEIGHT_Q,
+    storm: bool = False,
+    close: str = "",
+    extra_customs_h: float = CUSTOMS_Q,
+    wave_m: float | None = WAVE_Q,
+    wind_ms: float | None = WIND_Q,
+):
+    """Discrete-event rail–ferry synchronization (catch/miss vs ferry schedule)."""
+    route = data.get_route(route_id)
+    if route is None:
+        raise HTTPException(404, f"unknown route {route_id}")
+    try:
+        return docking.docking_analysis(
+            route,
+            weight_t,
+            storm,
             _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
         )
     except ValueError as e:
@@ -533,6 +583,26 @@ def clearance_ledger():
         "chain_valid": model.verify_ledger(),
         "note": model.CLEARANCE_NOTE,
     }
+
+
+@app.get("/api/clearance/anchor")
+def clearance_anchor_status():
+    """Real local-EVM DLT anchor status (py-evm devnet, not mainnet)."""
+    return anchor.status()
+
+
+@app.post("/api/clearance/anchor", dependencies=[Depends(guard_write)])
+def clearance_anchor_now():
+    """Anchor the current ledger root hash into the real local EVM contract."""
+    if not anchor.available():
+        raise HTTPException(503, "DLT-якорь недоступен (web3/eth-tester)")
+    last = store.last_ledger_entry()
+    root = last["hash"] if last else "0" * 64
+    seq = int(last["seq"]) if last else 0
+    try:
+        return anchor.anchor_root(root, seq, model.CLEARANCE_ISSUER)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @app.get("/api/clearance/documents/{shipment_id}")

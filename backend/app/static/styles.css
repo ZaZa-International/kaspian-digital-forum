@@ -508,6 +508,37 @@ input.doc-ref { font-family:var(--font-data); font-size:var(--fs-xs); margin-top
   .live-chip { display:none; }
 }
 
+/* ============ LIVE PORTS (П3) / DOCKING (П5) / DLT ANCHOR (П4) ============ */
+.port-top { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); flex-wrap:wrap; }
+.port-badge { font-size:var(--fs-xs); white-space:nowrap; }
+.port-badge-demo { background:var(--color-surface-2); color:var(--color-ink-3); border:1px solid var(--color-line); }
+.port-form { display:flex; gap:var(--sp-2); align-items:flex-end; flex-wrap:wrap; margin-top:var(--sp-3); padding-top:var(--sp-3); border-top:1px dashed var(--color-line); }
+.port-form .field { flex:1 1 84px; margin:0; font-size:var(--fs-xs); color:var(--color-ink-3); }
+.port-form input { width:100%; }
+.btn-sm { padding:var(--sp-1) var(--sp-3); font-size:var(--fs-sm); min-height:34px; }
+
+.docking-stats { display:grid; grid-template-columns:repeat(3,1fr); gap:var(--sp-3); margin-bottom:var(--sp-3); }
+.docking-stat { background:var(--color-surface-2); border:var(--border); border-radius:var(--radius); padding:var(--sp-3); text-align:center; }
+.docking-num { display:block; font-family:var(--font-data); font-size:var(--fs-md); font-weight:600; color:var(--color-ink); font-variant-numeric:tabular-nums; }
+.docking-num.chip-ok { color:var(--color-ok); }
+.docking-num.chip-warn { color:var(--color-signal-ink); }
+.docking-num.chip-danger { color:var(--color-danger-ink); }
+.docking-lbl { display:block; font-size:var(--fs-xs); color:var(--color-ink-3); margin-top:var(--sp-1); }
+.docking-example { display:flex; gap:var(--sp-2); align-items:flex-start; padding:var(--sp-3); border-radius:var(--radius); font-size:var(--fs-sm); margin-bottom:var(--sp-2); }
+.docking-example .ic { flex:none; margin-top:2px; }
+.docking-example.is-catch { background:var(--color-ok-soft); color:var(--color-ok); border-left:3px solid var(--color-ok); }
+.docking-example.is-miss { background:var(--color-danger-soft); color:var(--color-danger-ink); border-left:3px solid var(--color-danger); }
+
+.anchor-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:var(--sp-3); margin:0 0 var(--sp-3); }
+.anchor-grid > div { background:var(--color-surface-2); border:var(--border); border-radius:var(--radius); padding:var(--sp-3); min-width:0; }
+.anchor-grid dt { font-size:var(--fs-xs); color:var(--color-ink-3); text-transform:uppercase; letter-spacing:.04em; margin-bottom:var(--sp-1); }
+.anchor-grid dd { margin:0; font-size:var(--fs-sm); color:var(--color-ink); overflow-wrap:anywhere; }
+.mono { font-family:var(--font-data); font-size:.85em; }
+@media (max-width:768px) {
+  .docking-stats { grid-template-columns:1fr; }
+  .anchor-grid { grid-template-columns:1fr; }
+}
+
 /* ============ REDUCED MOTION ============ */
 @media (prefers-reduced-motion:reduce) {
   html { scroll-behavior:auto; }

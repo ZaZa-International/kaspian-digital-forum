@@ -115,8 +115,8 @@ def predict_leg(leg: dict, storm: bool, scenario: dict | None = None) -> dict:
     mode = leg["mode"]
     cong = scenario.get("congestion", {}).get(leg.get("port") or "", None)
     if cong is None:
-        p = data.PORTS.get(leg["port"] or "")
-        cong = p["congestion_pct"] if p else 0
+        pid = leg.get("port") or ""
+        cong = data.get_port(pid)["congestion_pct"] if pid in data.PORTS else 0
     customs = leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
     if mode == "sea":
         w = _sea_weather(leg, storm, scenario)
@@ -192,9 +192,15 @@ def simulate_route(
                 raise ValueError(f"leg {leg['id']} blocked: node closed by scenario")
             cong = scenario.get("congestion", {}).get(leg.get("port") or "", None)
             if cong is None:
-                p = data.PORTS.get(leg["port"] or "")
+                pid = leg.get("port") or ""
                 cong = (
-                    int(np.clip(rng.normal(p["congestion_pct"], 8), 0, 100)) if p else 0
+                    int(
+                        np.clip(
+                            rng.normal(data.get_port(pid)["congestion_pct"], 8), 0, 100
+                        )
+                    )
+                    if pid in data.PORTS
+                    else 0
                 )
             customs = leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
             customs = float(

@@ -1,0 +1,8 @@
+# Optional: real local-EVM DLT anchor (backend/app/anchor.py).
+# The core app runs WITHOUT these — the anchor gracefully degrades to the
+# off-chain hash-chain. Install to enable the on-chain tamper-evidence feature:
+#   pip install -r requirements-dlt.txt
+# Uses a local in-process EVM (py-evm) — no external RPC, no faucet, no mainnet.
+web3>=7.0
+eth-tester[py-evm]>=0.11
+eth-account>=0.13

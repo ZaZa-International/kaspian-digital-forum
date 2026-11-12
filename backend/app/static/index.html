@@ -143,7 +143,7 @@
       <div class="panel-sub">
         <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-anchor"/></svg>Порты: загруженность и таможня</h3></div>
         <div class="ports-grid" id="ports-grid"></div>
-        <p class="hint">Загруженность и очереди — демо-снимок; погода на море — живая (Open-Meteo). Паромы Каспия ходят без расписания: ожидание 1–2 дня — норма, до недели при заторах.</p>
+        <p class="hint">Официального открытого live-фида загруженности портов нет: значения ниже — демо-снимок либо сообщение оператора с меткой времени (operator-reported). Погода на море — живая (Open-Meteo). Паромы Каспия ходят без расписания: ожидание 1–2 дня — норма, до недели при заторах.</p>
       </div>
     </div>
   </section>
@@ -288,6 +288,10 @@
           <ol class="timeline" id="events-timeline"></ol>
         </div>
         <div class="ml-box" id="ml-box" aria-live="polite">ML-прогноз загружается…</div>
+        <div class="panel-sub">
+          <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-route"/></svg>Стыковка ж/д–паром</h3></div>
+          <div id="docking-card" aria-live="polite"><p class="hint loading">Загружается…</p></div>
+        </div>
       </div>
       <div class="panel" id="clearance-card">
         <div class="panel-head"><div class="panel-head-text"><h3><svg class="ic" aria-hidden="true"><use href="#i-doc"/></svg>Цифровой коридор: pre-clearance</h3></div></div>
@@ -298,6 +302,10 @@
         <div class="panel-sub">
           <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-ledger"/></svg>Реестр решений</h3></div>
           <ul class="ledger" id="ledger"></ul>
+        </div>
+        <div class="panel-sub">
+          <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg>DLT-якорь реестра</h3></div>
+          <div id="dlt-anchor-card" aria-live="polite"><p class="hint loading">Загружается…</p></div>
         </div>
       </div>
     </div>

@@ -25,32 +25,99 @@ What is real here (checked 12 Nov 2026):
 Still demo (no live feed exists in the open): port congestion %,
 customs queues, shipment list. Swap in data.py only.
 """
+
 from __future__ import annotations
 
 NODES = {
-    "moscow": {"id": "moscow", "name": "Москва", "country": "Россия",
-               "lat": 55.76, "lon": 37.62, "kind": "rail_hub"},
-    "astrakhan": {"id": "astrakhan", "name": "Астрахань", "country": "Россия",
-                  "lat": 46.35, "lon": 48.04, "kind": "port_rail"},
-    "makhachkala": {"id": "makhachkala", "name": "Махачкала", "country": "Россия",
-                    "lat": 42.98, "lon": 47.50, "kind": "port_rail"},
-    "baku": {"id": "baku", "name": "Баку", "country": "Азербайджан",
-             "lat": 40.37, "lon": 49.85, "kind": "port_rail"},
-    "aktau": {"id": "aktau", "name": "Актау / Курык", "country": "Казахстан",
-              "lat": 43.65, "lon": 51.15, "kind": "port_rail",
-              "note": "Паромный терминал — Курык (южнее Актау); порт Актау не принимает паромы с 2018 (Caravanistan, 06.2026)."},
-    "turkmenbashi": {"id": "turkmenbashi", "name": "Туркменбаши", "country": "Туркменистан",
-                     "lat": 40.02, "lon": 52.97, "kind": "port"},
-    "enzeli": {"id": "enzeli", "name": "Энзели", "country": "Иран",
-               "lat": 37.47, "lon": 49.46, "kind": "port"},
-    "amirabad": {"id": "amirabad", "name": "Амирабад", "country": "Иран",
-                 "lat": 36.85, "lon": 53.35, "kind": "port_rail"},
-    "astara": {"id": "astara", "name": "Астара", "country": "Азербайджан / Иран",
-               "lat": 38.45, "lon": 48.87, "kind": "border"},
-    "tehran": {"id": "tehran", "name": "Тегеран", "country": "Иран",
-               "lat": 35.69, "lon": 51.39, "kind": "rail_hub"},
-    "bandar_abbas": {"id": "bandar_abbas", "name": "Бендер-Аббас", "country": "Иран",
-                     "lat": 27.19, "lon": 56.27, "kind": "port_rail"},
+    "moscow": {
+        "id": "moscow",
+        "name": "Москва",
+        "country": "Россия",
+        "lat": 55.76,
+        "lon": 37.62,
+        "kind": "rail_hub",
+    },
+    "astrakhan": {
+        "id": "astrakhan",
+        "name": "Астрахань",
+        "country": "Россия",
+        "lat": 46.35,
+        "lon": 48.04,
+        "kind": "port_rail",
+    },
+    "makhachkala": {
+        "id": "makhachkala",
+        "name": "Махачкала",
+        "country": "Россия",
+        "lat": 42.98,
+        "lon": 47.50,
+        "kind": "port_rail",
+    },
+    "baku": {
+        "id": "baku",
+        "name": "Баку",
+        "country": "Азербайджан",
+        "lat": 40.37,
+        "lon": 49.85,
+        "kind": "port_rail",
+    },
+    "aktau": {
+        "id": "aktau",
+        "name": "Актау / Курык",
+        "country": "Казахстан",
+        "lat": 43.65,
+        "lon": 51.15,
+        "kind": "port_rail",
+        "note": "Паромный терминал — Курык (южнее Актау); порт Актау не принимает паромы с 2018 (Caravanistan, 06.2026).",
+    },
+    "turkmenbashi": {
+        "id": "turkmenbashi",
+        "name": "Туркменбаши",
+        "country": "Туркменистан",
+        "lat": 40.02,
+        "lon": 52.97,
+        "kind": "port",
+    },
+    "enzeli": {
+        "id": "enzeli",
+        "name": "Энзели",
+        "country": "Иран",
+        "lat": 37.47,
+        "lon": 49.46,
+        "kind": "port",
+    },
+    "amirabad": {
+        "id": "amirabad",
+        "name": "Амирабад",
+        "country": "Иран",
+        "lat": 36.85,
+        "lon": 53.35,
+        "kind": "port_rail",
+    },
+    "astara": {
+        "id": "astara",
+        "name": "Астара",
+        "country": "Азербайджан / Иран",
+        "lat": 38.45,
+        "lon": 48.87,
+        "kind": "border",
+    },
+    "tehran": {
+        "id": "tehran",
+        "name": "Тегеран",
+        "country": "Иран",
+        "lat": 35.69,
+        "lon": 51.39,
+        "kind": "rail_hub",
+    },
+    "bandar_abbas": {
+        "id": "bandar_abbas",
+        "name": "Бендер-Аббас",
+        "country": "Иран",
+        "lat": 27.19,
+        "lon": 56.27,
+        "kind": "port_rail",
+    },
 }
 
 # Sea-leg midpoints for live weather (Open-Meteo marine API).
@@ -61,13 +128,24 @@ SEA_SEGMENTS = {
 
 # Demo fallback weather (used only when live fetch fails / offline).
 WEATHER = {
-    "caspian_north": {"segment": "Астрахань — Актау", "wind_ms": 11, "wave_m": 1.2,
-                      "updated": "2026-11-12 06:00"},
-    "caspian_west": {"segment": "Махачкала — Амирабад", "wind_ms": 9, "wave_m": 0.9,
-                     "updated": "2026-11-12 06:00"},
+    "caspian_north": {
+        "segment": "Астрахань — Актау",
+        "wind_ms": 11,
+        "wave_m": 1.2,
+        "updated": "2026-11-12 06:00",
+    },
+    "caspian_west": {
+        "segment": "Махачкала — Амирабад",
+        "wind_ms": 9,
+        "wave_m": 0.9,
+        "updated": "2026-11-12 06:00",
+    },
 }
-STORM = {"wind_ms": 19, "wave_m": 3.4,
-         "label": "Шторм: ветер 19 м/с, волна 3,4 м (экстремум — за 90 дней макс. волна 2,52 м)"}
+STORM = {
+    "wind_ms": 19,
+    "wave_m": 3.4,
+    "label": "Шторм: ветер 19 м/с, волна 3,4 м (экстремум — за 90 дней макс. волна 2,52 м)",
+}
 
 # Port congestion (0-100%) and customs queue — demo snapshot.
 PORTS = {
@@ -94,11 +172,16 @@ CO2_FACTOR_META = {
     "source": "DESNZ 2026 GHG conversion factors, flat file v1.2 (31.07.2026)",
     "url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026",
     "unit": "g CO2e per tonne-km (well-to-wheel, total CO2e, AR5)",
-    "rows": {"rail": "27_315_3151_14_1", "sea": "27_320_3239_14_1 (RoRo-Ferry Average)",
-             "road": "27_304_3128_14_1 (articulated HGV, average laden)"},
-    "scope": ("Только ход по плечам (tonne-km). Не учтены: терминальные операции, "
-              "перегрузка, холостые пробеги, производство топлива вне WTT-фактора. "
-              "UK proxy для РФ/Иран/КЗ; морские факторы — международные средние IMO 2009."),
+    "rows": {
+        "rail": "27_315_3151_14_1",
+        "sea": "27_320_3239_14_1 (RoRo-Ferry Average)",
+        "road": "27_304_3128_14_1 (articulated HGV, average laden)",
+    },
+    "scope": (
+        "Только ход по плечам (tonne-km). Не учтены: терминальные операции, "
+        "перегрузка, холостые пробеги, производство топлива вне WTT-фактора. "
+        "UK proxy для РФ/Иран/КЗ; морские факторы — международные средние IMO 2009."
+    ),
     "quality": "default factors, indicative estimate — not a verified ISO 14083 report",
 }
 # Cost, USD per tonne-km — ESTIMATES. Order of magnitude consistent with Argus
@@ -118,47 +201,124 @@ CORRIDOR_STATS = [
 
 ROUTES = [
     {
-        "id": "R1", "name": "Западный — через Махачкалу",
+        "id": "R1",
+        "name": "Западный — через Махачкалу",
         "via": "Махачкала → паром → Амирабад",
         "legs": [
-            {"id": "R1-L1", "mode": "rail", "from": "moscow", "to": "makhachkala",
-             "distance_km": 1820, "base_h": 40, "port": "makhachkala", "customs_h": 0},
-            {"id": "R1-L2", "mode": "sea", "from": "makhachkala", "to": "amirabad",
-             "distance_km": 930, "base_h": 50, "sea": "caspian_west",
-             "sailing_interval_h": 72, "port": "amirabad", "customs_h": 5,
-             "conditional": True,
-             "note": "Условное плечо: регулярная линия Махачкала–Амирабад не подтверждена "
-                     "(тестовый рейс 2020, анонсы 2026 — см. docs/RESEARCH.md)."},
-            {"id": "R1-L3", "mode": "rail", "from": "amirabad", "to": "bandar_abbas",
-             "distance_km": 1300, "base_h": 32, "port": None, "customs_h": 0},
+            {
+                "id": "R1-L1",
+                "mode": "rail",
+                "from": "moscow",
+                "to": "makhachkala",
+                "distance_km": 1820,
+                "base_h": 40,
+                "port": "makhachkala",
+                "customs_h": 0,
+            },
+            {
+                "id": "R1-L2",
+                "mode": "sea",
+                "from": "makhachkala",
+                "to": "amirabad",
+                "distance_km": 930,
+                "base_h": 50,
+                "sea": "caspian_west",
+                "sailing_interval_h": 72,
+                "port": "amirabad",
+                "customs_h": 5,
+                "conditional": True,
+                "note": "Условное плечо: регулярная линия Махачкала–Амирабад не подтверждена "
+                "(тестовый рейс 2020, анонсы 2026 — см. docs/RESEARCH.md).",
+            },
+            {
+                "id": "R1-L3",
+                "mode": "rail",
+                "from": "amirabad",
+                "to": "bandar_abbas",
+                "distance_km": 1300,
+                "base_h": 32,
+                "port": None,
+                "customs_h": 0,
+            },
         ],
     },
     {
-        "id": "R2", "name": "Восточный — через Астрахань и Актау",
+        "id": "R2",
+        "name": "Восточный — через Астрахань и Актау",
         "via": "Астрахань → паром → Актау → Иран",
         "legs": [
-            {"id": "R2-L1", "mode": "rail", "from": "moscow", "to": "astrakhan",
-             "distance_km": 1280, "base_h": 30, "port": "astrakhan", "customs_h": 0},
-            {"id": "R2-L2", "mode": "sea", "from": "astrakhan", "to": "aktau",
-             "distance_km": 445, "base_h": 26, "sea": "caspian_north",
-             "sailing_interval_h": 72, "port": "aktau", "customs_h": 11},
-            {"id": "R2-L3", "mode": "rail", "from": "aktau", "to": "bandar_abbas",
-             "distance_km": 2100, "base_h": 52, "port": None, "customs_h": 4,
-             "conditional": True,
-             "note": "Условное длинное плечо: ж/д через Казахстан–Туркменистан–Иран (KTI), "
-                     "маршрут абстрактный, точный километраж не верифицирован."},
+            {
+                "id": "R2-L1",
+                "mode": "rail",
+                "from": "moscow",
+                "to": "astrakhan",
+                "distance_km": 1280,
+                "base_h": 30,
+                "port": "astrakhan",
+                "customs_h": 0,
+            },
+            {
+                "id": "R2-L2",
+                "mode": "sea",
+                "from": "astrakhan",
+                "to": "aktau",
+                "distance_km": 445,
+                "base_h": 26,
+                "sea": "caspian_north",
+                "sailing_interval_h": 72,
+                "port": "aktau",
+                "customs_h": 11,
+            },
+            {
+                "id": "R2-L3",
+                "mode": "rail",
+                "from": "aktau",
+                "to": "bandar_abbas",
+                "distance_km": 2100,
+                "base_h": 52,
+                "port": None,
+                "customs_h": 4,
+                "conditional": True,
+                "note": "Условное длинное плечо: ж/д через Казахстан–Туркменистан–Иран (KTI), "
+                "маршрут абстрактный, точный километраж не верифицирован.",
+            },
         ],
     },
     {
-        "id": "R3", "name": "Сухопутный — через Баку",
+        "id": "R3",
+        "name": "Сухопутный — через Баку",
         "via": "Баку → Астара → Тегеран (без моря)",
         "legs": [
-            {"id": "R3-L1", "mode": "rail", "from": "moscow", "to": "baku",
-             "distance_km": 2200, "base_h": 52, "port": "baku", "customs_h": 0},
-            {"id": "R3-L2", "mode": "road", "from": "baku", "to": "astara",
-             "distance_km": 300, "base_h": 6, "port": None, "customs_h": 7},
-            {"id": "R3-L3", "mode": "rail", "from": "astara", "to": "bandar_abbas",
-             "distance_km": 1500, "base_h": 36, "port": None, "customs_h": 0},
+            {
+                "id": "R3-L1",
+                "mode": "rail",
+                "from": "moscow",
+                "to": "baku",
+                "distance_km": 2200,
+                "base_h": 52,
+                "port": "baku",
+                "customs_h": 0,
+            },
+            {
+                "id": "R3-L2",
+                "mode": "road",
+                "from": "baku",
+                "to": "astara",
+                "distance_km": 300,
+                "base_h": 6,
+                "port": None,
+                "customs_h": 7,
+            },
+            {
+                "id": "R3-L3",
+                "mode": "rail",
+                "from": "astara",
+                "to": "bandar_abbas",
+                "distance_km": 1500,
+                "base_h": 36,
+                "port": None,
+                "customs_h": 0,
+            },
         ],
     },
 ]
@@ -174,30 +334,97 @@ for _r in ROUTES:
     for _leg in _r["legs"]:
         GRAPH_EDGES.append({**_leg, "route": _r["id"]})
 GRAPH_EDGES += [
-    {"id": "G-BAK-TBS", "mode": "sea", "from": "baku", "to": "turkmenbashi",
-     "distance_km": 620, "base_h": 34, "sea": "caspian_west",
-     "sailing_interval_h": 72, "port": "turkmenbashi", "customs_h": 4},
-    {"id": "G-AKT-BAK", "mode": "sea", "from": "aktau", "to": "baku",
-     "distance_km": 480, "base_h": 28, "sea": "caspian_north",
-     "sailing_interval_h": 72, "port": "baku", "customs_h": 6},
-    {"id": "G-AST-TEH", "mode": "rail", "from": "astara", "to": "tehran",
-     "distance_km": 450, "base_h": 12, "port": None, "customs_h": 0},
-    {"id": "G-TEH-BAB", "mode": "rail", "from": "tehran", "to": "bandar_abbas",
-     "distance_km": 1150, "base_h": 28, "port": None, "customs_h": 0},
-    {"id": "G-TBS-TEH", "mode": "rail", "from": "turkmenbashi", "to": "tehran",
-     "distance_km": 600, "base_h": 15, "port": None, "customs_h": 0},
-    {"id": "G-ASR-MAH", "mode": "rail", "from": "astrakhan", "to": "makhachkala",
-     "distance_km": 450, "base_h": 11, "port": "makhachkala", "customs_h": 0},
+    {
+        "id": "G-BAK-TBS",
+        "mode": "sea",
+        "from": "baku",
+        "to": "turkmenbashi",
+        "distance_km": 620,
+        "base_h": 34,
+        "sea": "caspian_west",
+        "sailing_interval_h": 72,
+        "port": "turkmenbashi",
+        "customs_h": 4,
+    },
+    {
+        "id": "G-AKT-BAK",
+        "mode": "sea",
+        "from": "aktau",
+        "to": "baku",
+        "distance_km": 480,
+        "base_h": 28,
+        "sea": "caspian_north",
+        "sailing_interval_h": 72,
+        "port": "baku",
+        "customs_h": 6,
+    },
+    {
+        "id": "G-AST-TEH",
+        "mode": "rail",
+        "from": "astara",
+        "to": "tehran",
+        "distance_km": 450,
+        "base_h": 12,
+        "port": None,
+        "customs_h": 0,
+    },
+    {
+        "id": "G-TEH-BAB",
+        "mode": "rail",
+        "from": "tehran",
+        "to": "bandar_abbas",
+        "distance_km": 1150,
+        "base_h": 28,
+        "port": None,
+        "customs_h": 0,
+    },
+    {
+        "id": "G-TBS-TEH",
+        "mode": "rail",
+        "from": "turkmenbashi",
+        "to": "tehran",
+        "distance_km": 600,
+        "base_h": 15,
+        "port": None,
+        "customs_h": 0,
+    },
+    {
+        "id": "G-ASR-MAH",
+        "mode": "rail",
+        "from": "astrakhan",
+        "to": "makhachkala",
+        "distance_km": 450,
+        "base_h": 11,
+        "port": "makhachkala",
+        "customs_h": 0,
+    },
     # Enzeli (case-listed port) connected via conditional ferry + rail to Tehran.
-    {"id": "G-MAH-ENZ", "mode": "sea", "from": "makhachkala", "to": "enzeli",
-     "distance_km": 700, "base_h": 32, "sea": "caspian_west",
-     "sailing_interval_h": 72, "port": "enzeli", "customs_h": 4,
-     "conditional": True,
-     "note": "Условное плечо: линия Махачкала–Энзели не подтверждена как регулярная "
-             "(docs/RESEARCH.md); расстояние haversine×1.1, время — оценка."},
-    {"id": "G-ENZ-TEH", "mode": "rail", "from": "enzeli", "to": "tehran",
-     "distance_km": 340, "base_h": 10, "port": None, "customs_h": 0,
-     "note": "Ж/д Энзели–Тегеран через Решт; расстояние оценочное (горный маршрут)."},
+    {
+        "id": "G-MAH-ENZ",
+        "mode": "sea",
+        "from": "makhachkala",
+        "to": "enzeli",
+        "distance_km": 700,
+        "base_h": 32,
+        "sea": "caspian_west",
+        "sailing_interval_h": 72,
+        "port": "enzeli",
+        "customs_h": 4,
+        "conditional": True,
+        "note": "Условное плечо: линия Махачкала–Энзели не подтверждена как регулярная "
+        "(docs/RESEARCH.md); расстояние haversine×1.1, время — оценка.",
+    },
+    {
+        "id": "G-ENZ-TEH",
+        "mode": "rail",
+        "from": "enzeli",
+        "to": "tehran",
+        "distance_km": 340,
+        "base_h": 10,
+        "port": None,
+        "customs_h": 0,
+        "note": "Ж/д Энзели–Тегеран через Решт; расстояние оценочное (горный маршрут).",
+    },
 ]
 
 DOC_TYPES = {
@@ -209,22 +436,55 @@ DOC_TYPES = {
 }
 
 SHIPMENTS = [
-    {"id": "SHP-1042", "name": "Электроника", "cargo": "2 × 40ft, бытовая техника",
-     "weight_t": 48, "route_id": "R1", "current_leg": 1,
-     "status": "в пути", "eta": "2026-11-16 14:00",
-     "docs": {"invoice": "verified", "packing_list": "verified",
-              "certificate_of_origin": "verified", "insurance": "pending"}},
-    {"id": "SHP-1043", "name": "Зерно", "cargo": "насыпью, пшеница",
-     "weight_t": 1200, "route_id": "R2", "current_leg": 0,
-     "status": "погрузка", "eta": "2026-11-18 09:00",
-     "docs": {"invoice": "verified", "packing_list": "verified",
-              "certificate_of_origin": "pending", "insurance": "verified",
-              "phytosanitary": "missing"}},
-    {"id": "SHP-1044", "name": "Стройматериалы", "cargo": "металлоконструкции",
-     "weight_t": 96, "route_id": "R3", "current_leg": 1,
-     "status": "в пути", "eta": "2026-11-15 20:00",
-     "docs": {"invoice": "verified", "packing_list": "verified",
-              "certificate_of_origin": "verified", "insurance": "verified"}},
+    {
+        "id": "SHP-1042",
+        "name": "Электроника",
+        "cargo": "2 × 40ft, бытовая техника",
+        "weight_t": 48,
+        "route_id": "R1",
+        "current_leg": 1,
+        "status": "в пути",
+        "eta": "2026-11-16 14:00",
+        "docs": {
+            "invoice": "verified",
+            "packing_list": "verified",
+            "certificate_of_origin": "verified",
+            "insurance": "pending",
+        },
+    },
+    {
+        "id": "SHP-1043",
+        "name": "Зерно",
+        "cargo": "насыпью, пшеница",
+        "weight_t": 1200,
+        "route_id": "R2",
+        "current_leg": 0,
+        "status": "погрузка",
+        "eta": "2026-11-18 09:00",
+        "docs": {
+            "invoice": "verified",
+            "packing_list": "verified",
+            "certificate_of_origin": "pending",
+            "insurance": "verified",
+            "phytosanitary": "missing",
+        },
+    },
+    {
+        "id": "SHP-1044",
+        "name": "Стройматериалы",
+        "cargo": "металлоконструкции",
+        "weight_t": 96,
+        "route_id": "R3",
+        "current_leg": 1,
+        "status": "в пути",
+        "eta": "2026-11-15 20:00",
+        "docs": {
+            "invoice": "verified",
+            "packing_list": "verified",
+            "certificate_of_origin": "verified",
+            "insurance": "verified",
+        },
+    },
 ]
 
 
@@ -234,3 +494,36 @@ def get_route(route_id: str) -> dict | None:
 
 def get_shipment(shipment_id: str) -> dict | None:
     return next((s for s in SHIPMENTS if s["id"] == shipment_id), None)
+
+
+# --- Live port overlay: operator-reported updates override the demo snapshot.
+# Honest provenance: there is no open live port feed, so anything without an
+# operator update stays "demo". Base PORTS is never mutated.
+def get_ports_live() -> dict[str, dict]:
+    """Demo snapshot with operator-reported updates overlaid (fresh copies)."""
+    from app import store  # lazy import: keep data.py free of app-level cycles
+
+    updates = store.get_port_updates()
+    out: dict[str, dict] = {}
+    for port_id, base in PORTS.items():
+        upd = updates.get(port_id)
+        if upd is not None:
+            out[port_id] = {
+                **base,
+                "congestion_pct": upd["congestion_pct"],
+                "customs_queue_h": upd["customs_queue_h"],
+                "source": upd["source"],
+                "live": True,
+                "updated_at": upd["updated_at"],
+            }
+        else:
+            out[port_id] = {**base, "source": "demo", "live": False, "updated_at": None}
+    return out
+
+
+def get_port(port_id: str) -> dict:
+    """Single port with the live overlay; KeyError for unknown port ids."""
+    ports = get_ports_live()
+    if port_id not in ports:
+        raise KeyError(port_id)
+    return ports[port_id]
