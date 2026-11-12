@@ -3,6 +3,9 @@
 What this is — and what it is not:
 - A REAL trained model (RandomForest + LinearRegression baseline) with
   a train/test split, MAE/R2 metrics and feature importances.
+- v0.3: ensemble — RandomForest + HistGradientBoosting (sklearn),
+  prediction = mean of the two; per-prediction occlusion attribution
+  (replace a feature by its training median, measure the change).
 - v0.2: wave/wind features are BOOTSTRAPPED FROM REAL DATA — the
   90-day Open-Meteo marine archive for the two sea legs
   (archive_weather.json, fetched 2026-11-12: north mean wave 0.45 m,
@@ -19,11 +22,8 @@ Train once at import (fast: <2 s for 800 rows).
 """
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
@@ -55,9 +55,7 @@ def _generative_delay(feat: dict) -> float:
 
 
 def _load_archive() -> dict:
-    p = Path(__file__).parent / "archive_weather.json"
-    with open(p, encoding="utf-8") as f:
-        return json.load(f)
+    return weather.load_archive()
 
 
 def _sample_history(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
@@ -90,35 +88,60 @@ def _sample_history(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _fit() -> dict:
-    """Fit both models on synthetic history. Swap _sample_history for a
-    real CSV read here later — everything downstream stays the same."""
+    """Fit RF + HistGradientBoosting + LinearRegression baseline.
+    Swap _sample_history for a real CSV read here later — everything
+    downstream stays the same."""
     rng = np.random.default_rng(RANDOM_STATE)
     X, y = _sample_history(rng)
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=RANDOM_STATE)
     rf = RandomForestRegressor(n_estimators=200, random_state=RANDOM_STATE, n_jobs=-1)
     rf.fit(X_train, y_train)
+    hgb = HistGradientBoostingRegressor(random_state=RANDOM_STATE)
+    hgb.fit(X_train, y_train)
     lr = LinearRegression()
     lr.fit(X_train, y_train)
-    pred = rf.predict(X_test)
+    pred_rf = rf.predict(X_test)
+    pred_hgb = hgb.predict(X_test)
+    pred_ens = (pred_rf + pred_hgb) / 2
+    medians = np.median(X_train, axis=0)
+
+    def _metrics(p):
+        return {"mae_h": round(float(mean_absolute_error(y_test, p)), 2),
+                "r2": round(float(r2_score(y_test, p)), 3)}
+
     return {
-        "rf": rf, "lr": lr,
+        "rf": rf, "hgb": hgb, "lr": lr, "medians": medians,
         "n_train": len(X_train), "n_test": len(X_test),
         "metrics": {
-            "random_forest": {
-                "mae_h": round(float(mean_absolute_error(y_test, pred)), 2),
-                "r2": round(float(r2_score(y_test, pred)), 3),
-            },
-            "linear_regression": {
-                "mae_h": round(float(mean_absolute_error(y_test, lr.predict(X_test))), 2),
-                "r2": round(float(r2_score(y_test, lr.predict(X_test))), 3),
-            },
+            "random_forest": _metrics(pred_rf),
+            "hist_gradient_boosting": _metrics(pred_hgb),
+            "ensemble_rf_hgb": _metrics(pred_ens),
+            "linear_regression": _metrics(lr.predict(X_test)),
         },
         "feature_importance": sorted(
             ({"feature": f, "importance": round(float(v), 3)}
              for f, v in zip(FEATURES, rf.feature_importances_)),
             key=lambda d: -d["importance"]),
     }
+
+
+def _ensemble_predict(trained: dict, x: np.ndarray) -> float:
+    return float((trained["rf"].predict(x)[0] + trained["hgb"].predict(x)[0]) / 2)
+
+
+def _occlusion_attribution(trained: dict, x: np.ndarray) -> list[dict]:
+    """Per-prediction local explanation: replace each feature by its
+    training median and measure the ensemble's change. Honest and
+    cheap; documented as occlusion attribution, not SHAP."""
+    base = _ensemble_predict(trained, x)
+    out = []
+    for i, f in enumerate(FEATURES):
+        x2 = x.copy()
+        x2[0, i] = trained["medians"][i]
+        delta = round(base - _ensemble_predict(trained, x2), 1)
+        out.append({"feature": f, "contribution_h": delta})
+    return sorted(out, key=lambda d: -abs(d["contribution_h"]))[:3]
 
 
 def get_trained() -> dict:
@@ -151,16 +174,19 @@ def predict_delay(route: dict, weight_t: float, storm: bool = False) -> dict:
     trained = get_trained()
     feat = route_features(route, weight_t, storm)
     x = np.array([[feat[f] for f in FEATURES]], dtype=float)
-    ml_delay = round(float(trained["rf"].predict(x)[0]), 1)
+    ml_delay = round(_ensemble_predict(trained, x), 1)
     scoring = model.forecast_route(route, weight_t, storm)
     return {
         "route_id": route["id"], "route_name": route["name"], "storm": storm,
         "features": feat,
         "ml_delay_h": max(0.0, ml_delay),
-        "ml_model": "RandomForestRegressor (200 trees)",
+        "ml_model": "Ensemble: RandomForest (200 trees) + HistGradientBoosting",
+        "rf_delay_h": round(float(trained["rf"].predict(x)[0]), 1),
+        "hgb_delay_h": round(float(trained["hgb"].predict(x)[0]), 1),
         "scoring_delay_h": scoring["delay_h"],
         "difference_h": round(abs(ml_delay - scoring["delay_h"]), 1),
         "top_factors": trained["feature_importance"][:3],
+        "local_attribution": _occlusion_attribution(trained, x),
     }
 
 
@@ -177,7 +203,8 @@ def info() -> dict:
                        "weather distributions the model trains on. The "
                        "pipeline takes a real history CSV without code "
                        "changes.",
-        "models": ["RandomForestRegressor (200 trees)",
+        "models": ["Ensemble: RandomForestRegressor (200 trees) + "
+                   "HistGradientBoostingRegressor",
                    "LinearRegression (baseline)"],
         "n_train": trained["n_train"], "n_test": trained["n_test"],
         "metrics": trained["metrics"],

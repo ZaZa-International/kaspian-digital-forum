@@ -50,7 +50,7 @@ def test_shipment_detail():
 
 
 def test_clearance_missing_docs_then_fixed():
-    model.LEDGER.clear()
+    model.clear_ledger()
     r = client.post("/api/clearance/submit", json={
         "shipment_id": "SHP-1043",
         "docs": {"invoice": "verified", "packing_list": "verified",
@@ -99,6 +99,79 @@ def test_ml_info_and_forecast():
     assert client.get("/api/ml/forecast?route_id=RX").status_code == 404
 
 
+def test_graph_search_and_scenario():
+    r = client.get("/api/routes/search?from_node=moscow&to_node=bandar_abbas&weight_t=48")
+    assert r.status_code == 200
+    paths = r.json()["paths"]
+    assert len(paths) >= 2
+    assert paths[0]["total_predicted_h"] <= paths[1]["total_predicted_h"]
+    # co2/cost are totals for the weight, not per-tonne values
+    assert paths[0]["co2_kg"] > 1000 and paths[0]["cost_usd"] > 1000
+    assert all(p["pareto_optimal"] in (True, False) for p in paths)
+    # closing Makhachkala must kill the R1 path (via makhachkala)
+    r2 = client.get("/api/routes/search?from_node=moscow&to_node=bandar_abbas&close=makhachkala")
+    assert all("makhachkala" not in p["nodes"] for p in r2.json()["paths"])
+    # closing the origin yields no paths
+    r3 = client.get("/api/routes/search?from_node=moscow&to_node=bandar_abbas&close=moscow")
+    assert r3.json()["paths"] == []
+    # forecast of a blocked route is 422
+    assert client.get("/api/routes/R1/forecast?close=makhachkala").status_code == 422
+    assert client.get("/api/routes/search?from_node=nope&to_node=bandar_abbas").status_code == 404
+
+
+def test_monte_carlo_p50_p90():
+    calm = client.get("/api/routes/R1/forecast?weight_t=48").json()
+    storm = client.get("/api/routes/R1/forecast?weight_t=48&storm=true").json()
+    mc = calm["monte_carlo"]
+    assert 0 <= calm["eta_p50_h"] <= calm["eta_p90_h"] <= calm["eta_p95_h"]
+    assert storm["eta_p90_h"] > calm["eta_p90_h"]
+    assert 0 <= mc["prob_delay_over_24h"] <= 1
+    assert calm["co2_breakdown"] and sum(b["co2_kg"] for b in calm["co2_breakdown"]) > 0
+    assert "ISO 14083" in calm["co2_method"]
+
+
+def test_timeline_and_exceptions():
+    tl = client.get("/api/shipments/SHP-1042/timeline").json()
+    assert tl["shipment_id"] == "SHP-1042"
+    assert len(tl["events"]) >= 5
+    assert all(e["status"] in ("done", "in_progress", "planned") for e in tl["events"])
+    assert tl["events"][0]["title"].startswith("Груз принят")
+    ex = client.get("/api/exceptions").json()["exceptions"]
+    assert isinstance(ex, list) and ex
+    assert all("action" in e and "severity" in e for e in ex)
+    assert any(e["shipment_id"] == "SHP-1043" for e in ex)  # missing phytosanitary
+    assert client.get("/api/shipments/NOPE/timeline").status_code == 404
+
+
+def test_ledger_persists_across_reload():
+    model.clear_ledger()
+    client.post("/api/clearance/submit", json={
+        "shipment_id": "SHP-1044",
+        "docs": {"invoice": "verified", "packing_list": "verified",
+                 "certificate_of_origin": "verified", "insurance": "verified"}})
+    reloaded = model._load_ledger()
+    assert len(reloaded) == 1 and reloaded[0]["decision"] == "pre-cleared"
+    assert model.verify_ledger() is True
+    model.clear_ledger()
+    assert model._load_ledger() == []
+
+
+def test_ml_ensemble_and_attribution():
+    info = client.get("/api/ml/info").json()
+    assert "hist_gradient_boosting" in info["metrics"]
+    assert "ensemble_rf_hgb" in info["metrics"]
+    assert info["metrics"]["ensemble_rf_hgb"]["r2"] > 0.6
+    fc = client.get("/api/ml/forecast?route_id=R1&weight_t=48").json()
+    assert "ensemble_delay_h" not in fc  # ml_delay_h IS the ensemble
+    assert fc["ml_model"].startswith("Ensemble")
+    assert fc["rf_delay_h"] >= 0 and fc["hgb_delay_h"] >= 0
+    assert len(fc["local_attribution"]) == 3
+    assert all("contribution_h" in a for a in fc["local_attribution"])
+
+
 def test_frontend_served():
     r = client.get("/")
     assert r.status_code == 200 and "Smart Caspian Transit" in r.text
+    assert client.get("/static/vendor/leaflet.js").status_code == 200
+    assert client.get("/static/manifest.json").status_code == 200
+    assert client.get("/sw.js").status_code == 200

@@ -126,12 +126,39 @@ ROUTES = [
         "legs": [
             {"id": "R3-L1", "mode": "rail", "from": "moscow", "to": "baku",
              "distance_km": 2200, "base_h": 52, "port": "baku", "customs_h": 0},
-            {"id": "R3-L2", "mode": "rail", "from": "baku", "to": "astara",
-             "distance_km": 300, "base_h": 8, "port": None, "customs_h": 7},
+            {"id": "R3-L2", "mode": "road", "from": "baku", "to": "astara",
+             "distance_km": 300, "base_h": 6, "port": None, "customs_h": 7},
             {"id": "R3-L3", "mode": "rail", "from": "astara", "to": "bandar_abbas",
              "distance_km": 1500, "base_h": 36, "port": None, "customs_h": 0},
         ],
     },
+]
+
+# Full corridor graph: every route leg + extra edges that enable
+# alternative paths (Baku-Turkmenbashi and Aktau-Baku ferries,
+# Astara-Tehran rail, Turkmenbashi-Tehran rail, Astrakhan-Makhachkala
+# rail). Distances: haversine x1.1 route factor for sea, rail/road
+# estimates from node coordinates. Dynamic routing (graph.py) searches
+# this graph instead of the three hardcoded routes.
+GRAPH_EDGES: list[dict] = []
+for _r in ROUTES:
+    for _leg in _r["legs"]:
+        GRAPH_EDGES.append({**_leg, "route": _r["id"]})
+GRAPH_EDGES += [
+    {"id": "G-BAK-TBS", "mode": "sea", "from": "baku", "to": "turkmenbashi",
+     "distance_km": 620, "base_h": 34, "sea": "caspian_west",
+     "sailing_interval_h": 72, "port": "turkmenbashi", "customs_h": 4},
+    {"id": "G-AKT-BAK", "mode": "sea", "from": "aktau", "to": "baku",
+     "distance_km": 480, "base_h": 28, "sea": "caspian_north",
+     "sailing_interval_h": 72, "port": "baku", "customs_h": 6},
+    {"id": "G-AST-TEH", "mode": "rail", "from": "astara", "to": "tehran",
+     "distance_km": 450, "base_h": 12, "port": None, "customs_h": 0},
+    {"id": "G-TEH-BAB", "mode": "rail", "from": "tehran", "to": "bandar_abbas",
+     "distance_km": 1150, "base_h": 28, "port": None, "customs_h": 0},
+    {"id": "G-TBS-TEH", "mode": "rail", "from": "turkmenbashi", "to": "tehran",
+     "distance_km": 600, "base_h": 15, "port": None, "customs_h": 0},
+    {"id": "G-ASR-MAH", "mode": "rail", "from": "astrakhan", "to": "makhachkala",
+     "distance_km": 450, "base_h": 11, "port": "makhachkala", "customs_h": 0},
 ]
 
 DOC_TYPES = {

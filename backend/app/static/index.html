@@ -3,8 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#06283d">
+<link rel="manifest" href="/static/manifest.json">
 <title>Smart Caspian Transit — цифровой двойник хаба «Север–Юг»</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -12,7 +14,7 @@
   <div class="wrap">
     <h1>🚢 Smart Caspian Transit</h1>
     <p class="sub">Предиктивный цифровой двойник мультимодального хаба МТК «Север–Юг» — Москва → Бендер-Аббас через Каспий</p>
-    <p class="badge">⚠️ Демо-данные: расстояния, погода и загруженность — иллюстративные; модель задержек — объяснимый скоринг, а не обученная ML-модель. <a href="#sources">Источники факторов</a></p>
+    <p class="badge">⚠️ Демо-данные: загруженность портов и очереди на таможне — иллюстративные; погода — живая (Open-Meteo); ML обучена на реальных распределениях погоды, метки задержек — по правилам коридора. <a href="#sources">Источники факторов</a></p>
   </div>
 </header>
 
@@ -39,10 +41,33 @@
     </div>
     <div id="map"></div>
     <table class="routes" id="compare-table">
-      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>Задержка</th><th>Риск срыва</th><th>CO₂</th><th>Стоимость*</th><th></th></tr></thead>
+      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>P90 ETA*</th><th>Задержка</th><th>Риск срыва</th><th>CO₂</th><th>Стоимость**</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
-    <p class="hint">* Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025: Актау–иранские порты $40–45/т). CO₂ по DESNZ 2026: ж/д 33 · паром RoRo 63 · авто 97 г/т-км.</p>
+    <p class="hint">* P90 ETA — время, которое не будет превышено в 90% сценариев (Monte Carlo, 200 прогонов по реальному архиву погоды). ** Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025: Актау–иранские порты $40–45/т). CO₂ по DESNZ 2026: ж/д 33 · паром RoRo 63 · авто 97 г/т-км.</p>
+  </section>
+
+  <section class="card">
+    <h2>🔍 Динамический поиск маршрута</h2>
+    <p class="hint">Не три заготовленных маршрута, а поиск по графу коридора (Дейкстра + Yen, k=3, Парето по времени/стоимости/CO₂).</p>
+    <div class="sim-controls">
+      <label>Откуда: <select id="search-from"></select></label>
+      <label>Куда: <select id="search-to"></select></label>
+      <label>Цель:
+        <select id="search-objective">
+          <option value="time">быстрее</option>
+          <option value="cost">дешевле</option>
+          <option value="co2">чище</option>
+        </select>
+      </label>
+      <button id="search-btn" class="primary">Найти маршруты</button>
+    </div>
+    <div id="search-results"></div>
+  </section>
+
+  <section class="card">
+    <h2>⚠ Исключения — что сломалось и что делать</h2>
+    <ul class="exceptions" id="exceptions-list"><li class="hint">Загружается…</li></ul>
   </section>
 
   <section class="card">
@@ -57,6 +82,20 @@
       </label>
       <label>Вес, тонн: <input type="number" id="quote-weight" min="1" max="5000" value="48"></label>
       <button id="quote-btn" class="primary">Рассчитать</button>
+    </div>
+    <div class="sim-controls">
+      <label>Сценарий: закрыть узел
+        <select id="scenario-close">
+          <option value="">— нет —</option>
+          <option value="makhachkala">Махачкала (порт закрыт)</option>
+          <option value="astrakhan">Астрахань (порт закрыт)</option>
+          <option value="aktau">Актау (порт закрыт)</option>
+          <option value="baku">Баку (узел закрыт)</option>
+        </select>
+      </label>
+      <label>Доп. таможня, ч: <input type="number" id="scenario-customs" min="0" max="72" value="0"></label>
+      <button id="scenario-btn" class="primary">Применить сценарий</button>
+      <button id="scenario-reset" class="storm-btn">Сбросить</button>
     </div>
     <p class="verdict" id="quote-result">Выберите маршрут и вес — покажем время, задержку, ML-прогноз, CO₂ и стоимость.</p>
   </section>
@@ -73,6 +112,8 @@
       <select id="shipment-select"></select>
       <div id="shipment-info"></div>
       <ol class="timeline" id="timeline"></ol>
+      <h3>События перевозки</h3>
+      <ol class="timeline" id="events-timeline"></ol>
       <p class="verdict" id="verdict">…</p>
       <p class="ml-box" id="ml-box">ML-прогноз загружается…</p>
     </div>
@@ -101,7 +142,13 @@
 
 <footer class="wrap foot">Smart Caspian Transit · команда Zaza international · хакатон IV Международного Каспийского цифрового форума · Каспийск, 13 ноября 2026 · Кейс 2, трек 3 «Цифровая экосистема МТК “Север–Юг”»</footer>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="/static/vendor/leaflet.js"></script>
 <script src="/static/app.js"></script>
+<script>
+  // PWA: cache static assets for offline demo. Never caches /api/*.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+</script>
 </body>
 </html>

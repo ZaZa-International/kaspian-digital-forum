@@ -1,6 +1,7 @@
 /* Smart Caspian Transit frontend: map + compare + shipment twin + clearance. */
 const $ = (s) => document.querySelector(s);
 let storm = false;
+let scenario = { close: "", extra_customs_h: 0 };
 let map, polylines = {};
 let shipments = [];
 let currentShipment = null;
@@ -37,11 +38,18 @@ async function initMap() {
   });
 }
 
+function scenarioQuery() {
+  const q = [];
+  if (scenario.close) q.push(`close=${scenario.close}`);
+  if (scenario.extra_customs_h) q.push(`extra_customs_h=${scenario.extra_customs_h}`);
+  return q.length ? "&" + q.join("&") : "";
+}
+
 async function loadCompare() {
-  const data = await getJSON(`/api/compare?weight_t=48&storm=${storm}`);
+  const data = await getJSON(`/api/compare?weight_t=48&storm=${storm}${scenarioQuery()}`);
   $("#compare-table tbody").innerHTML = data.routes.map((r) => `
     <tr><td><b>${r.route_id}</b> ${r.route_name}<br><span class="hint">${r.via}</span></td>
-    <td>${r.total_predicted_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
+    <td>${r.total_predicted_h} ч</td><td>${r.eta_p90_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
     <td>${(r.co2_kg / 1000).toFixed(1)} т</td><td>$${r.cost_usd.toLocaleString("ru-RU")}</td>
     <td>${r.route_id === data.best.time ? "⏱ быстрее" : ""} ${r.route_id === data.best.co2 ? "🌱 чище" : ""} ${r.route_id === data.best.risk ? "🛡 надёжнее" : ""}</td></tr>`).join("");
   const best = data.routes.find((r) => r.route_id === data.best.co2);
@@ -86,11 +94,49 @@ async function loadShipment() {
   await loadLedger();
   const mlp = await getJSON(`/api/ml/shipment/${currentShipment}?storm=${storm}`);
   const top = mlp.top_factors.map((f) => `${f.feature} (${f.importance})`).join(", ");
+  const attr = mlp.local_attribution.map((a) =>
+    `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
   $("#ml-box").innerHTML =
-    `🤖 <b>ML-прогноз</b> (RandomForest, обучена на 800 синтетических рейсах): ` +
+    `🤖 <b>ML-прогноз</b> (ансамбль RandomForest + HistGradientBoosting): ` +
     `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
-    `(расхождение ${mlp.difference_h} ч). Главные факторы: ${top}. ` +
-    `<span class="hint">Модель честно обучена на синтетике — реальных исторических данных в кейсе не было.</span>`;
+    `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${attr}. ` +
+    `Главные факторы глобально: ${top}. ` +
+    `<span class="hint">Обучена на реальных распределениях погоды (архив 90 дней); метки задержек — по правилам коридора.</span>`;
+  const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}`);
+  const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
+  $("#events-timeline").innerHTML = tl.events.map((e) => `
+    <li>${statusIcon[e.status] || ""} <b>${e.title}</b><br>
+    <span class="hint">${e.time.slice(0, 16).replace("T", " ")}${e.predicted_time ? " → прогноз " + e.predicted_time.slice(0, 16).replace("T", " ") : ""}</span><br>
+    <span class="why">${e.detail || ""}</span></li>`).join("");
+}
+
+async function loadExceptions() {
+  const data = await getJSON(`/api/exceptions?storm=${storm}`);
+  $("#exceptions-list").innerHTML = data.exceptions.length ? data.exceptions.map((e) => `
+    <li class="exc ${e.severity}"><b>${e.severity === "high" ? "🔴" : "🟡"} ${e.title}</b><br>
+    ${e.detail}<br><span class="action">→ ${e.action}</span></li>`).join("")
+    : `<li class="hint">Исключений нет — все грузы в графике.</li>`;
+}
+
+async function initSearch() {
+  const nodes = await getJSON("/api/nodes");
+  const opts = nodes.nodes.map((n) => `<option value="${n.id}">${n.name}</option>`).join("");
+  $("#search-from").innerHTML = opts;
+  $("#search-to").innerHTML = opts;
+  $("#search-from").value = "moscow";
+  $("#search-to").value = "bandar_abbas";
+}
+
+async function runSearch() {
+  const from = $("#search-from").value, to = $("#search-to").value;
+  const obj = $("#search-objective").value;
+  const data = await getJSON(`/api/routes/search?from_node=${from}&to_node=${to}&weight_t=48&storm=${storm}&objective=${obj}${scenarioQuery()}`);
+  $("#search-results").innerHTML = data.paths.length ? data.paths.map((p, i) => `
+    <div class="path-card"><b>${i + 1}. ${p.node_names.join(" → ")}</b>
+    ${p.pareto_optimal ? " <span class='pill ok'>Парето-оптимален</span>" : ""}<br>
+    <span class="hint">${p.modes.map((m) => MODE_RU[m]).join(" · ")}</span><br>
+    ${p.total_predicted_h} ч (P90 ${p.eta_p90_h || "—"} ч) · +${p.delay_h} ч · риск ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${p.cost_usd.toLocaleString("ru-RU")}</div>`).join("")
+    : `<p class="hint">Маршрутов нет — все пути заблокированы сценарием.</p>`;
 }
 
 async function loadLedger() {
@@ -133,18 +179,18 @@ async function loadLiveWeather() {
 async function runQuote() {
   const routeId = $("#quote-route").value;
   const weight = Math.max(1, +$("#quote-weight").value || 48);
-  const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}`);
+  const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}${scenarioQuery()}`);
   const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}`);
   $("#quote-result").textContent =
     `${fc.route_name}: ${fc.total_predicted_h} ч вместо ${fc.total_base_h} ч ` +
-    `(+${fc.delay_h} ч, риск срыва ${Math.round(fc.delay_probability * 100)}%). ` +
+    `(+${fc.delay_h} ч, риск срыва ${Math.round(fc.delay_probability * 100)}%, P90 ${fc.eta_p90_h} ч). ` +
     `ML-прогноз: +${mlp.ml_delay_h} ч. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
     `стоимость ~$${fc.cost_usd.toLocaleString("ru-RU")}. ${fc.recommendation}`;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather()]);
+    await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather(), initSearch(), loadExceptions()]);
   } catch (e) {
     console.error(e);
     $("#verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
@@ -154,9 +200,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     $("#storm-btn").textContent = storm ? "🌩 Шторм на Каспии: ВКЛ" : "🌩 Шторм на Каспии: выкл";
     $("#storm-btn").classList.toggle("on", storm);
     $("#storm-note").textContent = storm
-      ? "Шторм: ветер 19 м/с, волна 3,4 м — паромы не выходят по расписанию, морские плечи +24 ч."
+      ? "Шторм: ветер 19 м/с, волна 3,4 м — паромы не выходят, пропуск рейса +48 ч."
       : "Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.";
-    await Promise.all([loadCompare(), loadShipment()]);
+    await Promise.all([loadCompare(), loadShipment(), loadExceptions()]);
+  });
+  $("#search-btn").addEventListener("click", runSearch);
+  $("#scenario-btn").addEventListener("click", async () => {
+    scenario = { close: $("#scenario-close").value,
+                 extra_customs_h: Math.max(0, +$("#scenario-customs").value || 0) };
+    await Promise.all([loadCompare(), runQuote(), loadExceptions()]);
+  });
+  $("#scenario-reset").addEventListener("click", async () => {
+    scenario = { close: "", extra_customs_h: 0 };
+    $("#scenario-close").value = "";
+    $("#scenario-customs").value = 0;
+    await Promise.all([loadCompare(), runQuote(), loadExceptions()]);
   });
   $("#shipment-select").addEventListener("change", (e) => {
     currentShipment = e.target.value;

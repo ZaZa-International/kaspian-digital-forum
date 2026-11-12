@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import data, ml, model, weather
+from app import data, graph, ml, model, weather
 
 app = FastAPI(
     title="Smart Caspian Transit",
@@ -73,18 +73,66 @@ def routes():
     ]}
 
 
+def _parse_scenario(close: str = "", extra_customs_h: float = 0.0,
+                    wave_m: float | None = None,
+                    wind_ms: float | None = None) -> dict:
+    sc: dict = {}
+    if close:
+        sc["closed_nodes"] = [c.strip() for c in close.split(",") if c.strip()]
+    if extra_customs_h:
+        sc["customs_extra_h"] = extra_customs_h
+    if wave_m is not None:
+        sc["wave_m"] = wave_m
+    if wind_ms is not None:
+        sc["wind_ms"] = wind_ms
+    return sc
+
+
+@app.get("/api/graph")
+def graph_view():
+    return {"nodes": list(data.NODES.values()),
+            "edges": [{k: v for k, v in e.items() if k != "route"}
+                      for e in data.GRAPH_EDGES]}
+
+
+@app.get("/api/routes/search")
+def routes_search(from_node: str = Query("moscow"), to_node: str = Query("bandar_abbas"),
+                  weight_t: float = Query(48, gt=0), storm: bool = False,
+                  objective: str = Query("time", pattern="^(time|cost|co2)$"),
+                  k: int = Query(3, ge=1, le=5), close: str = ""):
+    try:
+        paths = graph.k_shortest_paths(
+            from_node, to_node, weight_t, storm,
+            _parse_scenario(close=close), objective, k)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"from": from_node, "to": to_node, "objective": objective,
+            "storm": storm, "paths": paths}
+
+
 @app.get("/api/routes/{route_id}/forecast")
 def route_forecast(route_id: str, weight_t: float = Query(48, gt=0),
-                   storm: bool = False):
+                   storm: bool = False, close: str = "",
+                   extra_customs_h: float = 0.0,
+                   wave_m: float | None = None, wind_ms: float | None = None):
     route = data.get_route(route_id)
     if route is None:
         raise HTTPException(404, f"unknown route {route_id}")
-    return model.forecast_route(route, weight_t, storm)
+    try:
+        return model.forecast_route(
+            route, weight_t, storm,
+            _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/api/compare")
-def compare(weight_t: float = Query(48, gt=0), storm: bool = False):
-    rows = model.compare_routes(weight_t, storm)
+def compare(weight_t: float = Query(48, gt=0), storm: bool = False,
+            close: str = "", extra_customs_h: float = 0.0):
+    rows = model.compare_routes(
+        weight_t, storm, _parse_scenario(close, extra_customs_h))
+    if not rows:
+        raise HTTPException(422, "all routes blocked by scenario")
     best_time = min(rows, key=lambda r: r["total_predicted_h"])["route_id"]
     best_co2 = min(rows, key=lambda r: r["co2_kg"])["route_id"]
     best_risk = min(rows, key=lambda r: r["delay_probability"])["route_id"]
@@ -114,6 +162,19 @@ def shipment_detail(shipment_id: str, storm: bool = False):
     return {**s, "route": route,
             "forecast": model.forecast_route(route, s["weight_t"], storm),
             "doc_types": data.DOC_TYPES}
+
+
+@app.get("/api/shipments/{shipment_id}/timeline")
+def shipment_timeline(shipment_id: str, storm: bool = False):
+    s = data.get_shipment(shipment_id)
+    if s is None:
+        raise HTTPException(404, f"unknown shipment {shipment_id}")
+    return model.shipment_timeline(s, storm)
+
+
+@app.get("/api/exceptions")
+def exceptions(storm: bool = False):
+    return {"storm": storm, "exceptions": model.compute_exceptions(storm)}
 
 
 class ClearanceRequest(BaseModel):
@@ -160,6 +221,12 @@ def ml_shipment(shipment_id: str, storm: bool = False):
 # --- frontend ---
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Served from root so the SW scope covers the whole app."""
+    return FileResponse(STATIC_DIR / "sw.js", media_type="application/javascript")
 
 
 @app.get("/")

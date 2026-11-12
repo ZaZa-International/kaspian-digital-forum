@@ -13,8 +13,29 @@ import json
 import time
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 from app import data
+
+ARCHIVE_PATH = Path(__file__).parent / "archive_weather.json"
+_archive: dict | None = None
+
+
+def load_archive() -> dict:
+    """90-day Open-Meteo marine archive (wave/wind samples per sea leg)."""
+    global _archive
+    if _archive is None:
+        with open(ARCHIVE_PATH, encoding="utf-8") as f:
+            _archive = json.load(f)
+    return _archive
+
+
+def bootstrap_sea_state(rng, sea: str) -> tuple[float, float]:
+    """One random (wave_m, wind_ms) hour from the real archive."""
+    seg = load_archive()["segments"][sea]
+    wave = float(rng.choice(seg["wave_m"]["samples"]))
+    wind = float(rng.choice(seg["wind_ms"]["samples"]))
+    return wave, wind
 
 CACHE_TTL_S = 30 * 60
 _cache: dict = {"at": 0.0, "payload": None}
