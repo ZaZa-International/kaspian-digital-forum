@@ -169,6 +169,22 @@ def test_ml_ensemble_and_attribution():
     assert all("contribution_h" in a for a in fc["local_attribution"])
 
 
+def test_create_shipment():
+    model.clear_created_shipments()
+    r = client.post("/api/shipments", json={
+        "name": "Тест", "cargo": "1 × 20ft", "weight_t": 20, "route_id": "R3"})
+    assert r.status_code == 201
+    sid = r.json()["id"]
+    assert sid.startswith("SHP-")
+    assert client.get(f"/api/shipments/{sid}").status_code == 200
+    assert client.get(f"/api/shipments/{sid}/timeline").status_code == 200
+    assert client.get(f"/api/ml/shipment/{sid}").status_code == 200
+    assert any(s["id"] == sid for s in client.get("/api/shipments").json()["shipments"])
+    assert client.post("/api/shipments", json={
+        "name": "X", "cargo": "y", "weight_t": 1, "route_id": "RX"}).status_code == 404
+    model.clear_created_shipments()
+
+
 def test_frontend_served():
     r = client.get("/")
     assert r.status_code == 200 and "Smart Caspian Transit" in r.text

@@ -111,6 +111,21 @@
       <h2>Цифровой двойник груза</h2>
       <select id="shipment-select"></select>
       <div id="shipment-info"></div>
+      <h3>Создать груз</h3>
+      <div class="sim-controls">
+        <label>Название: <input type="text" id="new-name" value="Электроника" style="width:100%"></label>
+        <label>Груз: <input type="text" id="new-cargo" value="1 × 40ft" style="width:100%"></label>
+        <label>Вес, т: <input type="number" id="new-weight" min="1" max="5000" value="48"></label>
+        <label>Маршрут:
+          <select id="new-route">
+            <option value="R1">R1 — Западный</option>
+            <option value="R2">R2 — Восточный</option>
+            <option value="R3">R3 — Сухопутный</option>
+          </select>
+        </label>
+        <button id="create-btn" class="primary">Создать и отслеживать</button>
+      </div>
+      <p class="hint" id="create-result"></p>
       <ol class="timeline" id="timeline"></ol>
       <h3>События перевозки</h3>
       <ol class="timeline" id="events-timeline"></ol>

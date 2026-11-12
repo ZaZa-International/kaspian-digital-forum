@@ -220,6 +220,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentShipment = e.target.value;
     loadShipment();
   });
+  $("#create-btn").addEventListener("click", async () => {
+    const body = {
+      name: $("#new-name").value || "Груз",
+      cargo: $("#new-cargo").value || "—",
+      weight_t: Math.max(1, +$("#new-weight").value || 48),
+      route_id: $("#new-route").value,
+    };
+    try {
+      const res = await getJSON("/api/shipments", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("#create-result").textContent = `✅ Груз ${res.id} создан. ETA ${res.eta.slice(0, 16).replace("T", " ")}.`;
+      await loadShipments();
+      currentShipment = res.id;
+      $("#shipment-select").value = res.id;
+      await loadShipment();
+    } catch (e) {
+      $("#create-result").textContent = "Не удалось создать груз: " + e.message;
+    }
+  });
   $("#quote-btn").addEventListener("click", runQuote);
   $("#clearance-btn").addEventListener("click", async () => {
     const s = shipments.find((x) => x.id === currentShipment);

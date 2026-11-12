@@ -143,7 +143,7 @@ def compare(weight_t: float = Query(48, gt=0), storm: bool = False,
 @app.get("/api/shipments")
 def shipments():
     out = []
-    for s in data.SHIPMENTS:
+    for s in model.all_shipments():
         route = data.get_route(s["route_id"])
         fc = model.forecast_route(route, s["weight_t"])
         out.append({**s, "route_name": route["name"],
@@ -153,9 +153,26 @@ def shipments():
     return {"shipments": out}
 
 
+class ShipmentCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    cargo: str = Field(min_length=1, max_length=200)
+    weight_t: float = Field(gt=0, le=5000)
+    route_id: str
+    docs: dict[str, str] | None = None
+
+
+@app.post("/api/shipments", status_code=201)
+def create_shipment(req: ShipmentCreate):
+    try:
+        return model.create_shipment(req.name, req.cargo, req.weight_t,
+                                     req.route_id, req.docs)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
 @app.get("/api/shipments/{shipment_id}")
 def shipment_detail(shipment_id: str, storm: bool = False):
-    s = data.get_shipment(shipment_id)
+    s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     route = data.get_route(s["route_id"])
@@ -166,7 +183,7 @@ def shipment_detail(shipment_id: str, storm: bool = False):
 
 @app.get("/api/shipments/{shipment_id}/timeline")
 def shipment_timeline(shipment_id: str, storm: bool = False):
-    s = data.get_shipment(shipment_id)
+    s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     return model.shipment_timeline(s, storm)
@@ -212,7 +229,7 @@ def ml_forecast(route_id: str, weight_t: float = Query(48, gt=0),
 
 @app.get("/api/ml/shipment/{shipment_id}")
 def ml_shipment(shipment_id: str, storm: bool = False):
-    s = data.get_shipment(shipment_id)
+    s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
     return ml.predict_delay(data.get_route(s["route_id"]), s["weight_t"], storm)

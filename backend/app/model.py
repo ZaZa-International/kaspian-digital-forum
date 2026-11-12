@@ -235,6 +235,60 @@ def compare_routes(weight_t: float, storm: bool = False,
     return out
 
 
+# --- Shipments store: seed shipments + user-created ones (JSON file).
+SHIPMENTS_FILE = Path(__file__).parent / "data" / "shipments.json"
+
+
+def _load_created_shipments() -> list[dict]:
+    try:
+        with open(SHIPMENTS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_created_shipments(rows: list[dict]) -> None:
+    SHIPMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SHIPMENTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(rows, f, ensure_ascii=False, indent=1)
+
+
+def all_shipments() -> list[dict]:
+    return list(data.SHIPMENTS) + _load_created_shipments()
+
+
+def get_shipment_any(shipment_id: str) -> dict | None:
+    s = data.get_shipment(shipment_id)
+    if s is not None:
+        return s
+    return next((x for x in _load_created_shipments() if x["id"] == shipment_id), None)
+
+
+def create_shipment(name: str, cargo: str, weight_t: float, route_id: str,
+                    docs: dict[str, str] | None = None) -> dict:
+    route = data.get_route(route_id)
+    if route is None:
+        raise ValueError(f"unknown route {route_id}")
+    rows = _load_created_shipments()
+    n = len(rows) + 1
+    sid = f"SHP-{2000 + n}"
+    doc_types = list(data.DOC_TYPES.keys())
+    shipment = {
+        "id": sid, "name": name, "cargo": cargo, "weight_t": weight_t,
+        "route_id": route_id, "current_leg": 0, "status": "создан",
+        "eta": (datetime.now(timezone.utc) +
+                timedelta(hours=sum(l["base_h"] for l in route["legs"]))).isoformat(),
+        "docs": docs if docs is not None else {d: "pending" for d in doc_types[:4]},
+    }
+    rows.append(shipment)
+    _save_created_shipments(rows)
+    return shipment
+
+
+def clear_created_shipments() -> None:
+    _save_created_shipments([])
+
+
 # --- Pre-clearance ledger: append-only hash chain, persistent JSON file.
 # Mechanics shown (hash link + tamper-evidence), not a production DLT.
 def _load_ledger() -> list[dict]:
@@ -264,7 +318,7 @@ def ledger_last_hash() -> str:
 
 
 def submit_clearance(shipment_id: str, docs: dict[str, str]) -> dict:
-    shipment = data.get_shipment(shipment_id)
+    shipment = get_shipment_any(shipment_id)
     if shipment is None:
         raise ValueError(f"unknown shipment {shipment_id}")
     required = list(shipment["docs"].keys())
@@ -388,7 +442,7 @@ def compute_exceptions(storm: bool = False) -> list[dict]:
                 "detail": f"Ожидание на терминале ~{round(p['congestion_pct'] * 0.12, 1)} ч, таможня ~{p['customs_queue_h']} ч.",
                 "action": "Сдвиньте стыковку с паромом или выберите соседний порт.",
             })
-    for s in data.SHIPMENTS:
+    for s in all_shipments():
         route = data.get_route(s["route_id"])
         fc = forecast_route(route, s["weight_t"], storm)
         missing = [d for d, v in s["docs"].items() if v == "missing"]

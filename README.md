@@ -135,8 +135,8 @@ API-документация: http://localhost:8000/docs
 - `GET /api/graph`, `/api/routes/search` (динамический поиск),
   `/api/routes/{id}/forecast` (+ параметры сценария),
   `/api/compare` (+ P50/P90)
-- `GET /api/shipments`, `/api/shipments/{id}`,
-  `/api/shipments/{id}/timeline`, `/api/exceptions`
+- `GET /api/shipments`, `POST /api/shipments` (создание груза),
+  `/api/shipments/{id}`, `/api/shipments/{id}/timeline`, `/api/exceptions`
 - `GET /api/routes`, `GET /api/routes/{id}/forecast?weight_t=48&storm=false`
 - `GET /api/compare?weight_t=48&storm=false` — сравнение маршрутов
 - `GET /api/shipments`, `GET /api/shipments/{id}?storm=false`
