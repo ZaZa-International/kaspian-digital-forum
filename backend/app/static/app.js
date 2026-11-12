@@ -106,9 +106,15 @@ async function loadShipment() {
     `Прогноз: ${s.forecast.total_predicted_h} ч = ход ${s.forecast.total_base_h} ч` +
     (s.forecast.total_wait_h ? ` + ожидание парома ${s.forecast.total_wait_h} ч` : "") +
     ` + задержки ${s.forecast.delay_h} ч. ${s.forecast.recommendation} CO₂ маршрута: ${(s.forecast.co2_kg / 1000).toFixed(1)} т.`;
-  const docLabel = { verified: "проверен", pending: "на проверке", missing: "нет документа" };
-  $("#docs-list").innerHTML = Object.entries(s.docs).map(([k, v]) => `
-    <li><span class="dot ${esc(v)}"></span><b>${esc(s.doc_types[k] || k)}</b> — ${esc(docLabel[v] || v)}</li>`).join("");
+  const docLabel = { verified: "проверен", submitted: "подан, ждёт проверки",
+                     missing: "нет документа", rejected: "отказ", expired: "истёк срок",
+                     unknown: "неизвестный тип" };
+  $("#docs-list").innerHTML = (s.documents || []).map((d) => `
+    <li><span class="dot ${esc(d.status)}"></span><b>${esc(s.doc_types[d.doc_type] || d.doc_type)}</b> — ${esc(docLabel[d.status] || d.status)}
+    ${d.issuer ? `<br><span class="hint">решение: ${esc(d.issuer)}${d.decided_at ? " · " + esc(fmtDT(d.decided_at)) : ""}</span>` : ""}
+    ${d.content_hash ? `<br><span class="hash">hash ${esc(d.content_hash.slice(0, 12))}… · источник: ${esc(d.source || "—")}</span>` : ""}
+    ${d.status !== "verified" ? `<br><input type="text" class="doc-ref" data-doc="${esc(d.doc_type)}" placeholder="Ссылка на документ (REJ- → отказ, EXP- → истёк)" value="${esc(d.ref || "")}">` : ""}
+    </li>`).join("");
   $("#clearance-result").textContent = "";
   await loadLedger();
   const mlp = await getJSON(`/api/ml/shipment/${currentShipment}?storm=${storm}`);
@@ -168,6 +174,7 @@ async function loadLedger() {
   const data = await getJSON("/api/clearance/ledger");
   $("#ledger").innerHTML = data.entries.length ? data.entries.map((e) => `
     <li>#${e.seq} · ${esc(e.shipment_id)} · <b>${esc(e.decision === "pre-cleared" ? "✅ pre-cleared" : "⚠ нужны документы: " + e.missing.join(", "))}</b><br>
+    <span class="hint">${esc(e.issuer || "demo")} · правила ${esc(e.rule_version || "v0")} · ${esc(fmtDT(e.ts))}</span><br>
     <span class="hash">hash ${esc(e.hash.slice(0, 16))}… ← prev ${esc(e.prev_hash.slice(0, 12))}…</span></li>`).join("")
     : `<li class="hint">Пока пусто — отправьте груз на pre-clearance.</li>`;
 }
@@ -279,20 +286,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       currentShipment = res.id;
       $("#shipment-select").value = res.id;
       await loadShipment();
+      await loadExceptions();
     } catch (e) {
       $("#create-result").textContent = "Не удалось создать груз: " + e.message;
     }
   });
   $("#quote-btn").addEventListener("click", runQuote);
   $("#clearance-btn").addEventListener("click", async () => {
-    const s = shipments.find((x) => x.id === currentShipment);
-    const res = await getJSON("/api/clearance/submit", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ shipment_id: s.id, docs: s.docs }),
+    const refs = {};
+    document.querySelectorAll(".doc-ref").forEach((inp) => {
+      if (inp.value.trim()) refs[inp.dataset.doc] = inp.value.trim();
     });
-    $("#clearance-result").textContent = res.decision === "pre-cleared"
-      ? `✅ Pre-clearance пройден. Запись #${res.seq} в реестре, hash ${res.hash.slice(0, 16)}…`
-      : `⚠ Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы».`;
-    await loadLedger();
+    try {
+      const res = await getJSON("/api/clearance/submit", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipment_id: currentShipment, docs: refs }),
+      });
+      await loadShipment();
+      await loadExceptions();
+      $("#clearance-result").textContent = res.decision === "pre-cleared"
+        ? `✅ Pre-clearance пройден (симуляция). Запись #${res.seq}, hash ${res.hash.slice(0, 16)}… Решение: ${res.issuer}, правила ${res.rule_version}.`
+        : `⚠ Не хватает документов: ${res.missing.join(", ")}. Запись #${res.seq} — «нужны документы». Решение: ${res.issuer}.`;
+    } catch (e) {
+      $("#clearance-result").textContent = "Ошибка pre-clearance: " + e.message;
+    }
   });
 });

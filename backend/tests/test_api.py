@@ -1,10 +1,20 @@
 """Smoke tests for Smart Caspian Transit. Run: pytest -q (from backend/)."""
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app import model
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_runtime_state():
+    model.clear_ledger()
+    model.clear_created_shipments()
+    yield
+    model.clear_ledger()
+    model.clear_created_shipments()
 
 
 def test_health():
@@ -50,22 +60,19 @@ def test_shipment_detail():
 
 
 def test_clearance_missing_docs_then_fixed():
-    model.clear_ledger()
     r = client.post("/api/clearance/submit", json={
-        "shipment_id": "SHP-1043",
-        "docs": {"invoice": "verified", "packing_list": "verified",
-                 "certificate_of_origin": "pending", "insurance": "verified",
-                 "phytosanitary": "missing"}})
+        "shipment_id": "SHP-1043", "docs": {}})
     assert r.status_code == 200
     assert r.json()["decision"] == "needs_documents"
-    assert "phytosanitary" in r.json()["missing"]
+    assert r.json()["missing"] == ["phytosanitary"]
     r2 = client.post("/api/clearance/submit", json={
-        "shipment_id": "SHP-1044",
-        "docs": {"invoice": "verified", "packing_list": "verified",
-                 "certificate_of_origin": "verified", "insurance": "verified"}})
+        "shipment_id": "SHP-1043", "docs": {"phytosanitary": "PHY-123"}})
     assert r2.json()["decision"] == "pre-cleared"
+    r3 = client.post("/api/clearance/submit", json={
+        "shipment_id": "SHP-1044", "docs": {}})
+    assert r3.json()["decision"] == "pre-cleared"
     ledger = client.get("/api/clearance/ledger").json()
-    assert len(ledger["entries"]) == 2
+    assert len(ledger["entries"]) == 3
     assert ledger["chain_valid"] is True
     assert ledger["entries"][1]["prev_hash"] == ledger["entries"][0]["hash"]
 

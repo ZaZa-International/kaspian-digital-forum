@@ -259,7 +259,8 @@ def shipment_detail(shipment_id: str, storm: bool = False, close: str = "",
             _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
     except ValueError as e:
         raise HTTPException(422, str(e))
-    return {**s, "route": route, "forecast": fc, "doc_types": data.DOC_TYPES}
+    return {**s, "route": route, "forecast": fc, "doc_types": data.DOC_TYPES,
+            "documents": model.ensure_documents(s)}
 
 
 @app.get("/api/shipments/{shipment_id}/timeline")
@@ -286,7 +287,10 @@ def exceptions(storm: bool = False, close: str = "",
 
 class ClearanceRequest(BaseModel):
     shipment_id: str = Field(max_length=30)
-    docs: dict[str, str] = Field(default_factory=dict)
+    docs: dict[str, str] = Field(
+        default_factory=dict,
+        description="Ссылки на документы {тип: reference}. Статусы назначает сервер "
+                    "(симуляция таможенного органа), не клиент.")
 
     @field_validator("docs")
     @classmethod
@@ -310,7 +314,19 @@ def clearance_submit(req: ClearanceRequest):
 
 @app.get("/api/clearance/ledger")
 def clearance_ledger():
-    return {"entries": model.ledger_entries(), "chain_valid": model.verify_ledger()}
+    return {"entries": model.ledger_entries(), "chain_valid": model.verify_ledger(),
+            "note": model.CLEARANCE_NOTE}
+
+
+@app.get("/api/clearance/documents/{shipment_id}")
+def clearance_documents(shipment_id: str):
+    try:
+        docs = model.get_documents(shipment_id)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"shipment_id": shipment_id, "documents": docs,
+            "doc_types": data.DOC_TYPES, "rule_version": model.DOC_RULE_VERSION,
+            "issuer": model.CLEARANCE_ISSUER, "note": model.CLEARANCE_NOTE}
 
 
 @app.post("/api/demo/reset", dependencies=[Depends(guard_write)])

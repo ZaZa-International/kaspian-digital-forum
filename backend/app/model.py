@@ -308,8 +308,107 @@ def clear_created_shipments() -> None:
     store.clear_shipments()
 
 
-# --- Pre-clearance ledger: append-only hash chain in SQLite (store.py).
-# Mechanics shown (hash link + tamper-evidence), not a production DLT.
+# --- Pre-clearance: document registry + append-only hash chain (store.py).
+# Statuses are assigned by SERVER rules (simulated customs authority), never
+# by a client-supplied "verified" field. The hash chain is a tamper-evident
+# demo mechanic, not a production DLT (no distributed consensus).
+DOC_RULE_VERSION = "demo-rules-v1"
+CLEARANCE_ISSUER = "SCT Demo Customs Authority (симуляция)"
+CLEARANCE_NOTE = ("Проверка симулируется демо-правилами: документ считается проверенным, "
+                  "если подана непустая ссылка; префикс REJ- → отказ, EXP- → истёк. "
+                  "Реальной таможенной системы нет.")
+
+
+def ensure_documents(shipment: dict) -> list[dict]:
+    """Initialise the registry from seed/creation data once, with provenance."""
+    docs = store.get_documents(shipment["id"])
+    if docs:
+        return docs
+    for dtype, status in shipment.get("docs", {}).items():
+        if status == "verified":
+            store.upsert_document(
+                shipment["id"], dtype, status="verified", ref="demo-seed",
+                issuer=CLEARANCE_ISSUER, source="demo-seed",
+                note="Проверен в демо-наборе (симуляция)", rule_version=DOC_RULE_VERSION)
+        elif status == "missing":
+            store.upsert_document(shipment["id"], dtype, status="missing",
+                                  source="demo-seed", note="Документ не подан")
+        else:
+            store.upsert_document(shipment["id"], dtype, status="submitted",
+                                  ref="demo-pending", source="demo-seed",
+                                  note="Подан, ожидает проверки (симуляция)")
+    return store.get_documents(shipment["id"])
+
+
+def get_documents(shipment_id: str) -> list[dict]:
+    shipment = get_shipment_any(shipment_id)
+    if shipment is None:
+        raise ValueError(f"unknown shipment {shipment_id}")
+    return ensure_documents(shipment)
+
+
+def _authority_check(doc: dict) -> None:
+    """Simulated customs authority decision on a submitted document."""
+    ref = doc.get("ref") or ""
+    if not ref:
+        store.upsert_document(doc["shipment_id"], doc["doc_type"], status="missing",
+                              source=doc.get("source"), note="Пустая ссылка — документ не подан")
+    elif ref.startswith("REJ-"):
+        store.upsert_document(doc["shipment_id"], doc["doc_type"], status="rejected",
+                              ref=ref, issuer=CLEARANCE_ISSUER, source=doc.get("source"),
+                              note="Отказ демо-правила: префикс REJ-", rule_version=DOC_RULE_VERSION)
+    elif ref.startswith("EXP-"):
+        store.upsert_document(doc["shipment_id"], doc["doc_type"], status="expired",
+                              ref=ref, issuer=CLEARANCE_ISSUER, source=doc.get("source"),
+                              note="Истёк срок действия (демо-правило: префикс EXP-)",
+                              rule_version=DOC_RULE_VERSION)
+    else:
+        store.upsert_document(doc["shipment_id"], doc["doc_type"], status="verified",
+                              ref=ref, issuer=CLEARANCE_ISSUER, source=doc.get("source"),
+                              note="Проверен симуляцией: ссылка подана, формат валиден",
+                              rule_version=DOC_RULE_VERSION)
+
+
+def submit_clearance(shipment_id: str, docs: dict[str, str] | None = None) -> dict:
+    """docs = {doc_type: reference} — client submits document REFERENCES.
+    The server registers them, runs the simulated authority check and only
+    then decides. A client cannot assign 'verified' itself."""
+    shipment = get_shipment_any(shipment_id)
+    if shipment is None:
+        raise ValueError(f"unknown shipment {shipment_id}")
+    ensure_documents(shipment)
+    required = list(shipment.get("docs", {}).keys())
+    for dtype, ref in (docs or {}).items():
+        if dtype not in data.DOC_TYPES:
+            store.upsert_document(shipment_id, dtype, status="unknown", ref=str(ref),
+                                  source="client (demo)",
+                                  note="Неизвестный тип документа — не участвует в решении")
+        else:
+            store.upsert_document(shipment_id, dtype, status="submitted", ref=str(ref),
+                                  source="client (demo)", note="Подан клиентом, ожидает проверки")
+    for doc in store.get_documents(shipment_id):
+        if doc["doc_type"] in required and doc["status"] == "submitted":
+            _authority_check(doc)
+    registry = store.get_documents(shipment_id)
+    by_type = {d["doc_type"]: d for d in registry}
+    missing = [t for t in required if by_type.get(t, {}).get("status") != "verified"]
+    decision = "pre-cleared" if not missing else "needs_documents"
+    snapshot = [{"doc_type": d["doc_type"], "status": d["status"],
+                 "content_hash": d["content_hash"], "issuer": d["issuer"],
+                 "source": d["source"], "rule_version": d["rule_version"]}
+                for d in registry]
+    doc_hash = hashlib.sha256(
+        json.dumps({"shipment": shipment_id, "docs": snapshot},
+                   sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return store.append_ledger_entry(
+        shipment_id=shipment_id, decision=decision, missing=missing, doc_hash=doc_hash,
+        issuer=CLEARANCE_ISSUER, rule_version=DOC_RULE_VERSION, docs_snapshot=snapshot)
+
+
+def verify_ledger() -> bool:
+    return store.verify_ledger()
+
+
 def _load_ledger() -> list[dict]:
     return store.ledger_entries()
 
@@ -320,30 +419,12 @@ def ledger_entries() -> list[dict]:
 
 def clear_ledger() -> None:
     store.clear_ledger()
+    store.clear_documents()
 
 
 def ledger_last_hash() -> str:
     last = store.last_ledger_entry()
     return last["hash"] if last else "0" * 64
-
-
-def submit_clearance(shipment_id: str, docs: dict[str, str]) -> dict:
-    shipment = get_shipment_any(shipment_id)
-    if shipment is None:
-        raise ValueError(f"unknown shipment {shipment_id}")
-    required = list(shipment["docs"].keys())
-    missing = [d for d in required if docs.get(d) != "verified"]
-    doc_hash = hashlib.sha256(
-        json.dumps({"shipment": shipment_id, "docs": docs},
-                   sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
-    decision = "pre-cleared" if not missing else "needs_documents"
-    return store.append_ledger_entry(
-        shipment_id=shipment_id, decision=decision, missing=missing, doc_hash=doc_hash)
-
-
-def verify_ledger() -> bool:
-    return store.verify_ledger()
 
 
 # --- Digital twin: event timeline for a shipment.
@@ -464,7 +545,8 @@ def compute_exceptions(storm: bool = False, scenario: dict | None = None) -> lis
                 "action": "Выберите альтернативный маршрут в динамическом поиске.",
             })
             continue
-        missing = [d for d, v in s["docs"].items() if v == "missing"]
+        registry = ensure_documents(s)
+        missing = [d["doc_type"] for d in registry if d["status"] == "missing"]
         if missing:
             out.append({
                 "severity": "high", "shipment_id": s["id"],

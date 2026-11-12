@@ -42,7 +42,24 @@ CREATE TABLE IF NOT EXISTS ledger (
     doc_hash TEXT NOT NULL,
     prev_hash TEXT NOT NULL,
     hash TEXT NOT NULL,
-    ts TEXT NOT NULL
+    ts TEXT NOT NULL,
+    issuer TEXT,
+    rule_version TEXT,
+    docs_json TEXT
+);
+CREATE TABLE IF NOT EXISTS documents (
+    shipment_id TEXT NOT NULL,
+    doc_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    ref TEXT,
+    content_hash TEXT,
+    issuer TEXT,
+    source TEXT,
+    note TEXT,
+    rule_version TEXT,
+    submitted_at TEXT,
+    decided_at TEXT,
+    PRIMARY KEY (shipment_id, doc_type)
 );
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
@@ -85,8 +102,18 @@ def _migrate_legacy_once() -> None:
         if _migrated:
             return
         _migrated = True
+        _migrate_schema()
         _migrate_legacy_shipments()
         _migrate_legacy_ledger()
+
+
+def _migrate_schema() -> None:
+    """Add columns introduced after v1 to an existing database."""
+    with sqlite3.connect(DB_PATH, timeout=15) as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ledger)")}
+        for col, ddl in (("issuer", "TEXT"), ("rule_version", "TEXT"), ("docs_json", "TEXT")):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE ledger ADD COLUMN {col} {ddl}")
 
 
 def _migrate_legacy_shipments() -> None:
@@ -208,7 +235,9 @@ def clear_shipments() -> None:
 def _ledger_dict(r: sqlite3.Row) -> dict:
     return {"seq": r["seq"], "shipment_id": r["shipment_id"], "decision": r["decision"],
             "missing": json.loads(r["missing_json"]), "doc_hash": r["doc_hash"],
-            "prev_hash": r["prev_hash"], "hash": r["hash"], "ts": r["ts"]}
+            "prev_hash": r["prev_hash"], "hash": r["hash"], "ts": r["ts"],
+            "issuer": r["issuer"], "rule_version": r["rule_version"],
+            "docs": json.loads(r["docs_json"]) if r["docs_json"] else None}
 
 
 def ledger_entries() -> list[dict]:
@@ -228,26 +257,31 @@ def last_ledger_entry(shipment_id: str | None = None) -> dict | None:
 
 
 def append_ledger_entry(*, shipment_id: str, decision: str, missing: list[str],
-                        doc_hash: str) -> dict:
+                        doc_hash: str, issuer: str | None = None,
+                        rule_version: str | None = None,
+                        docs_snapshot: list[dict] | None = None) -> dict:
     """Hash-chain append inside one write transaction: seq, prev_hash and
-    hash are computed atomically, so concurrent submits cannot fork the chain."""
+    hash are computed atomically, so concurrent submits cannot fork the chain.
+    The hash covers decision + document snapshot + issuer + rule version."""
     conn = _connect()
     try:
         conn.execute("BEGIN IMMEDIATE")
         prev_row = conn.execute("SELECT hash FROM ledger ORDER BY seq DESC LIMIT 1").fetchone()
         prev = prev_row["hash"] if prev_row else "0" * 64
-        payload = f"{prev}|{shipment_id}|{decision}|{doc_hash}"
+        payload = f"{prev}|{shipment_id}|{decision}|{doc_hash}|{rule_version}|{issuer}"
         h = hashlib.sha256(payload.encode()).hexdigest()
         ts = datetime.now(timezone.utc).isoformat()
         cur = conn.execute(
-            "INSERT INTO ledger (shipment_id,decision,missing_json,doc_hash,prev_hash,hash,ts) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO ledger (shipment_id,decision,missing_json,doc_hash,prev_hash,hash,ts,"
+            "issuer,rule_version,docs_json) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (shipment_id, decision, json.dumps(missing, ensure_ascii=False),
-             doc_hash, prev, h, ts))
+             doc_hash, prev, h, ts, issuer, rule_version,
+             json.dumps(docs_snapshot, ensure_ascii=False) if docs_snapshot is not None else None))
         conn.commit()
         return {"seq": cur.lastrowid, "shipment_id": shipment_id, "decision": decision,
                 "missing": missing, "doc_hash": doc_hash, "prev_hash": prev,
-                "hash": h, "ts": ts}
+                "hash": h, "ts": ts, "issuer": issuer, "rule_version": rule_version,
+                "docs": docs_snapshot}
     except BaseException:
         conn.rollback()
         raise
@@ -265,11 +299,65 @@ def verify_ledger() -> bool:
     for e in ledger_entries():
         if e["prev_hash"] != prev:
             return False
-        payload = f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|{e['doc_hash']}"
+        if e["rule_version"] is None and e["issuer"] is None:
+            # legacy v1 entry (pre-provenance): original payload format
+            payload = f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|{e['doc_hash']}"
+        else:
+            payload = (f"{e['prev_hash']}|{e['shipment_id']}|{e['decision']}|"
+                       f"{e['doc_hash']}|{e['rule_version']}|{e['issuer']}")
         if hashlib.sha256(payload.encode()).hexdigest() != e["hash"]:
             return False
         prev = e["hash"]
     return True
+
+
+# --- Document registry: evidence-level statuses with provenance.
+DOC_STATUSES = ("missing", "submitted", "verified", "rejected", "expired", "unknown")
+
+
+def _doc_dict(r: sqlite3.Row) -> dict:
+    return {k: r[k] for k in ("shipment_id", "doc_type", "status", "ref", "content_hash",
+                              "issuer", "source", "note", "rule_version",
+                              "submitted_at", "decided_at")}
+
+
+def get_documents(shipment_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM documents WHERE shipment_id=? ORDER BY doc_type",
+                            (shipment_id,)).fetchall()
+    return [_doc_dict(r) for r in rows]
+
+
+def upsert_document(shipment_id: str, doc_type: str, *, status: str,
+                    ref: str | None = None, issuer: str | None = None,
+                    source: str | None = None, note: str | None = None,
+                    rule_version: str | None = None) -> dict:
+    if status not in DOC_STATUSES:
+        raise ValueError(f"invalid document status {status}")
+    now = datetime.now(timezone.utc).isoformat()
+    content_hash = hashlib.sha256(ref.encode()).hexdigest() if ref else None
+    submitted_at = now if status == "submitted" else None
+    decided_at = now if status in ("verified", "rejected", "expired") else None
+    with _conn() as conn:
+        prev = conn.execute("SELECT submitted_at FROM documents WHERE shipment_id=? AND doc_type=?",
+                            (shipment_id, doc_type)).fetchone()
+        if submitted_at is None and prev:
+            submitted_at = prev["submitted_at"]
+        conn.execute(
+            "INSERT INTO documents (shipment_id,doc_type,status,ref,content_hash,issuer,source,"
+            "note,rule_version,submitted_at,decided_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(shipment_id,doc_type) DO UPDATE SET status=excluded.status, "
+            "ref=excluded.ref, content_hash=excluded.content_hash, issuer=excluded.issuer, "
+            "source=excluded.source, note=excluded.note, rule_version=excluded.rule_version, "
+            "submitted_at=excluded.submitted_at, decided_at=excluded.decided_at",
+            (shipment_id, doc_type, status, ref, content_hash, issuer, source, note,
+             rule_version, submitted_at, decided_at))
+    return next(d for d in get_documents(shipment_id) if d["doc_type"] == doc_type)
+
+
+def clear_documents() -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM documents")
 
 
 def reset_demo() -> dict:
@@ -279,4 +367,5 @@ def reset_demo() -> dict:
         n_led = conn.execute("SELECT COUNT(*) c FROM ledger").fetchone()["c"]
         conn.execute("DELETE FROM shipments")
         conn.execute("DELETE FROM ledger")
+        conn.execute("DELETE FROM documents")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

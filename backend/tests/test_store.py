@@ -125,10 +125,11 @@ def test_ledger_tamper_detected():
     client.post("/api/clearance/submit", json={"shipment_id": "SHP-1044", "docs": {}})
     client.post("/api/clearance/submit", json={"shipment_id": "SHP-1043", "docs": {}})
     assert store.verify_ledger() is True
-    # tamper: change a decision in the middle of the chain
-    first_seq = store.ledger_entries()[0]["seq"]
+    # tamper: flip a decision in the middle of the chain
+    first = store.ledger_entries()[0]
+    flipped = "needs_documents" if first["decision"] == "pre-cleared" else "pre-cleared"
     with store._conn() as conn:
-        conn.execute("UPDATE ledger SET decision='pre-cleared' WHERE seq=?", (first_seq,))
+        conn.execute("UPDATE ledger SET decision=? WHERE seq=?", (flipped, first["seq"]))
     assert store.verify_ledger() is False
     # tamper: delete the first entry -> next entry's prev_hash no longer matches genesis
     store.reset_demo()
