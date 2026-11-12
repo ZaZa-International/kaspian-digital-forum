@@ -1,9 +1,11 @@
 /* Offline cache for static assets only (never API responses).
-   v2: network-first for navigations (no stale index.html), cache-first
-   for versioned static assets, explicit offline fallback. */
-const CACHE = "sct-static-v2";
-const ASSETS = ["/", "/static/styles.css", "/static/app.js",
-                "/static/manifest.json", "/static/icon-192.png", "/static/icon-512.png",
+   v4: network-first for navigations (no stale index.html), cache-first
+   for versioned static assets, explicit offline fallback. Self-hosted
+   fonts + chart icon cached for offline demo. */
+const CACHE = "sct-static-v4";
+const ASSETS = ["/", "/static/styles.css", "/static/fonts.css", "/static/app.js",
+                "/static/manifest.json", "/static/icon.svg",
+                "/static/icon-192.png", "/static/icon-512.png",
                 "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
                 "/static/vendor/images/marker-icon.png",
                 "/static/vendor/images/marker-icon-2x.png",
