@@ -80,6 +80,7 @@ async function loadCompare() {
     <tr><td><b>${esc(r.route_id)}</b> ${esc(r.route_name)}<br><span class="hint">${esc(r.via)}</span></td>
     <td>${r.total_predicted_h} ч${r.total_wait_h ? `<br><span class="hint">вкл. ожидание парома ${r.total_wait_h} ч</span>` : ""}</td><td>${r.eta_p90_h} ч</td><td>+${r.delay_h} ч</td><td>${riskPill(r.delay_probability)}</td>
     <td>${(r.co2_kg / 1000).toFixed(1)} т</td><td>$${esc(r.cost_usd.toLocaleString("ru-RU"))}</td>
+    <td>${r.storm_price_h} ч</td>
     <td>${r.route_id === data.best.time ? "⏱ быстрее" : ""} ${r.route_id === data.best.co2 ? "🌱 чище" : ""} ${r.route_id === data.best.risk ? "🛡 надёжнее" : ""}</td></tr>`).join("");
   const best = data.routes.find((r) => r.route_id === data.best.co2);
   $("#kpi-co2").textContent = `${best.route_id}: ${(best.co2_kg / 1000).toFixed(1)} т CO₂`;
@@ -152,12 +153,20 @@ async function loadShipment() {
   const top = mlp.top_factors.map((f) => `${f.feature} (${f.importance})`).join(", ");
   const attr = mlp.local_attribution.map((a) =>
     `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
+  const ex = mlp.extrapolation || {};
+  const exFlag = ex.is_extrapolating
+    ? `<span class="pill high">⚠ ЭКСТРАПОЛЯЦИЯ: L1 ${ex.l1_to_median} &gt; p95 опыта ${ex.train_p95} — модель вне своего опыта, доверяйте скорингу</span><br>`
+    : `<span class="pill ok">в пределах опыта: L1 ${ex.l1_to_median} ≤ p95 ${ex.train_p95}</span><br>`;
+  const analogs = (mlp.analogs || []).map((a) =>
+    `волна ${a.max_wave_m} м, ветер ${a.max_wind_ms} м/с, порт ${a.max_congestion_pct}% → +${a.delay_h} ч (L1 ${a.l1})`).join("; ");
   $("#ml-box").innerHTML =
+    exFlag +
     `🤖 <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
     `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
     `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
     `Главные факторы глобально: ${esc(top)}. ` +
-    `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>`;
+    `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>` +
+    (analogs ? `<br><span class="hint">Похожие сценарии (kNN по манхэттенскому L1, демо-аналоги — иллюстрация, не точный прогноз): ${esc(analogs)}.</span>` : "");
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
   const actualHtml = (tl.actual_events || []).map((e) => `
@@ -203,7 +212,7 @@ async function runSearch() {
     ${p.pareto_optimal ? " <span class='pill ok'>Парето (среди найденных)</span>" : ""}
     ${p.has_conditional_legs ? " <span class='pill medium'>есть условные плечи</span>" : ""}<br>
     <span class="hint">${p.modes.map((m) => MODE_RU[m]).join(" · ")}</span><br>
-    ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · P90 симуляции ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · индекс риска ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}</div>`).join("")
+    ${p.total_predicted_h} ч${p.total_wait_h ? ` (вкл. ожидание ${p.total_wait_h} ч)` : ""} · P90 симуляции ${p.eta_p90_h || "—"} ч · +${p.delay_h} ч · индекс риска ${Math.round(p.delay_probability * 100)}% · CO₂ ${(p.co2_kg / 1000).toFixed(1)} т · $${esc(p.cost_usd.toLocaleString("ru-RU"))}<br><span class="hint">${esc(p.search_algorithm)} · раскрытий узлов: ${p.expansions_first_search}</span></div>`).join("")
     : `<p class="hint">Маршрутов нет — все пути заблокированы сценарием.</p>`;
   document.querySelectorAll("#search-results .path-card").forEach((card) => {
     card.addEventListener("click", () => {

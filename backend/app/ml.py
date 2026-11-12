@@ -20,6 +20,7 @@ What this is — and what it is not:
 
 Train once at import (fast: <2 s for 800 rows).
 """
+
 from __future__ import annotations
 
 import csv
@@ -36,8 +37,16 @@ from sklearn.model_selection import train_test_split
 
 from app import data, model, weather
 
-FEATURES = ["max_wave_m", "max_wind_ms", "max_congestion_pct",
-            "total_customs_h", "sea_km", "rail_km", "weight_t", "sea_legs"]
+FEATURES = [
+    "max_wave_m",
+    "max_wind_ms",
+    "max_congestion_pct",
+    "total_customs_h",
+    "sea_km",
+    "rail_km",
+    "weight_t",
+    "sea_legs",
+]
 N_SAMPLES = 800
 RANDOM_STATE = 42
 HISTORY_CSV_ENV = "SCT_ML_HISTORY_CSV"
@@ -124,8 +133,7 @@ def load_history_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict]:
             raise ValueError(f"history CSV row {i + 2}: negative delay_h")
         y.append(d)
         ts.append(r.get(CSV_OPTIONAL_TS) or "")
-    meta = {"n": len(rows), "has_timestamps": all(ts),
-            "source": str(path)}
+    meta = {"n": len(rows), "has_timestamps": all(ts), "source": str(path)}
     return np.array(X, dtype=float), np.array(y, dtype=float), meta
 
 
@@ -143,7 +151,9 @@ def _fit() -> dict:
     csv_path = os.environ.get(HISTORY_CSV_ENV, "")
     if csv_path:
         X, y, meta = load_history_csv(csv_path)
-        dataset_kind = "csv (user-provided; verify provenance before claiming real-world accuracy)"
+        dataset_kind = (
+            "csv (user-provided; verify provenance before claiming real-world accuracy)"
+        )
         if meta["has_timestamps"]:
             order = np.argsort([r for r in _csv_timestamps(csv_path)])
             X, y = X[order], y[order]
@@ -152,14 +162,16 @@ def _fit() -> dict:
             split = "chronological 80/20 (by departed_at)"
         else:
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=RANDOM_STATE)
+                X, y, test_size=0.2, random_state=RANDOM_STATE
+            )
             split = "random 80/20 (no timestamps in CSV)"
     else:
         rng = np.random.default_rng(RANDOM_STATE)
         X, y = _sample_history(rng)
         dataset_kind = "synthetic (rule-generated labels + Gaussian noise)"
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=RANDOM_STATE)
+            X, y, test_size=0.2, random_state=RANDOM_STATE
+        )
         split = "random 80/20 (synthetic i.i.d. samples)"
     rf = RandomForestRegressor(n_estimators=200, random_state=RANDOM_STATE, n_jobs=-1)
     rf.fit(X_train, y_train)
@@ -171,17 +183,34 @@ def _fit() -> dict:
     pred_hgb = hgb.predict(X_test)
     pred_ens = (pred_rf + pred_hgb) / 2
     medians = np.median(X_train, axis=0)
+    mad = np.median(np.abs(X_train - medians), axis=0)
+    mad[mad == 0] = 1.0
+    train_l1 = np.sum(np.abs(X_train - medians) / mad, axis=1)
 
     def _metrics(p):
-        return {"mae_h": round(float(mean_absolute_error(y_test, p)), 2),
-                "r2": round(float(r2_score(y_test, p)), 3)}
+        return {
+            "mae_h": round(float(mean_absolute_error(y_test, p)), 2),
+            "r2": round(float(r2_score(y_test, p)), 3),
+        }
 
     return {
-        "rf": rf, "hgb": hgb, "lr": lr, "medians": medians,
-        "n_train": len(X_train), "n_test": len(X_test),
+        "rf": rf,
+        "hgb": hgb,
+        "lr": lr,
+        "medians": medians,
+        "X_train": X_train,
+        "y_train": y_train,
+        "mad": mad,
+        "l1_train_p95": float(np.percentile(train_l1, 95)),
+        "l1_train_max": float(train_l1.max()),
+        "n_train": len(X_train),
+        "n_test": len(X_test),
         "dataset": {
-            "kind": dataset_kind, "hash": _dataset_hash(X, y),
-            "n": len(X), "split": split, "seed": RANDOM_STATE,
+            "kind": dataset_kind,
+            "hash": _dataset_hash(X, y),
+            "n": len(X),
+            "split": split,
+            "seed": RANDOM_STATE,
             "versions": {"scikit-learn": sklearn.__version__, "numpy": np.__version__},
         },
         "metrics": {
@@ -191,9 +220,12 @@ def _fit() -> dict:
             "linear_regression": _metrics(lr.predict(X_test)),
         },
         "feature_importance": sorted(
-            ({"feature": f, "importance": round(float(v), 3)}
-             for f, v in zip(FEATURES, rf.feature_importances_)),
-            key=lambda d: -d["importance"]),
+            (
+                {"feature": f, "importance": round(float(v), 3)}
+                for f, v in zip(FEATURES, rf.feature_importances_)
+            ),
+            key=lambda d: -d["importance"],
+        ),
     }
 
 
@@ -227,16 +259,67 @@ def get_trained() -> dict:
     return _TRAINED
 
 
-def route_features(route: dict, weight_t: float, storm: bool,
-                   scenario: dict | None = None) -> dict:
+def _l1_to_median(trained: dict, x: np.ndarray) -> float:
+    """MAD-scaled Manhattan distance from a feature vector to the training
+    median — robust to outliers (an anomaly grows linearly, not quadratically
+    as in L2). The 'Manhattan' metric in feature space."""
+    return float(np.sum(np.abs(x[0] - trained["medians"]) / trained["mad"]))
+
+
+def extrapolation(trained: dict, x: np.ndarray) -> dict:
+    """Out-of-distribution alarm: when the current shipment is farther from
+    the training experience than 95% of training samples, the ensemble is
+    extrapolating — trust the explainable scoring instead. Verified: calm R1
+    ~10.1 (inside), storm R1 ~25.1 (outside; train p95 ~12.1, max ~17.5)."""
+    d = _l1_to_median(trained, x)
+    p95 = trained["l1_train_p95"]
+    return {
+        "l1_to_median": round(d, 2),
+        "train_p95": round(p95, 2),
+        "train_max": round(trained["l1_train_max"], 2),
+        "is_extrapolating": d > p95,
+        "metric": "MAD-scaled L1 (Manhattan) to training median",
+        "note": (
+            "Флаг экстраполяции: модель за пределами своего опыта — "
+            "доверяйте объяснимому скорингу. Метки синтетические."
+        ),
+    }
+
+
+def l1_analogs(trained: dict, x: np.ndarray, k: int = 3) -> list[dict]:
+    """k nearest training scenarios by MAD-scaled L1. Illustrative 'similar
+    cases', NOT a precise predictor (calm analogs spread widely). Labels are
+    synthetic — shown as demo analogs."""
+    d = np.sum(np.abs(trained["X_train"] - x[0]) / trained["mad"], axis=1)
+    idx = np.argsort(d)[:k]
+    out = []
+    for i in idx:
+        row = dict(zip(FEATURES, trained["X_train"][i]))
+        out.append(
+            {
+                "l1": round(float(d[i]), 2),
+                "delay_h": round(float(trained["y_train"][i]), 1),
+                "max_wave_m": round(float(row["max_wave_m"]), 2),
+                "max_wind_ms": round(float(row["max_wind_ms"]), 1),
+                "max_congestion_pct": int(row["max_congestion_pct"]),
+                "total_customs_h": round(float(row["total_customs_h"]), 1),
+            }
+        )
+    return out
+
+
+def route_features(
+    route: dict, weight_t: float, storm: bool, scenario: dict | None = None
+) -> dict:
     """Same scenario semantics as the scoring model (model._sea_weather):
     explicit wave/wind > storm > live; customs extra on every leg; closed
     nodes raise ValueError."""
     scenario = scenario or {}
     wave, wind, cong, customs, sea_km, rail_km, sea_legs = 0.0, 0.0, 0, 0, 0, 0, 0
     for leg in route["legs"]:
-        if leg["from"] in scenario.get("closed_nodes", []) or \
-                leg["to"] in scenario.get("closed_nodes", []):
+        if leg["from"] in scenario.get("closed_nodes", []) or leg["to"] in scenario.get(
+            "closed_nodes", []
+        ):
             raise ValueError(f"leg {leg['id']} blocked: node closed by scenario")
         if leg["mode"] == "sea":
             sea_legs += 1
@@ -252,20 +335,30 @@ def route_features(route: dict, weight_t: float, storm: bool,
                 c = data.PORTS.get(leg["port"], {}).get("congestion_pct", 0)
             cong = max(cong, c)
         customs += leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
-    return {"max_wave_m": wave, "max_wind_ms": wind, "max_congestion_pct": cong,
-            "total_customs_h": customs, "sea_km": sea_km, "rail_km": rail_km,
-            "weight_t": weight_t, "sea_legs": sea_legs}
+    return {
+        "max_wave_m": wave,
+        "max_wind_ms": wind,
+        "max_congestion_pct": cong,
+        "total_customs_h": customs,
+        "sea_km": sea_km,
+        "rail_km": rail_km,
+        "weight_t": weight_t,
+        "sea_legs": sea_legs,
+    }
 
 
-def predict_delay(route: dict, weight_t: float, storm: bool = False,
-                  scenario: dict | None = None) -> dict:
+def predict_delay(
+    route: dict, weight_t: float, storm: bool = False, scenario: dict | None = None
+) -> dict:
     trained = get_trained()
     feat = route_features(route, weight_t, storm, scenario)
     x = np.array([[feat[f] for f in FEATURES]], dtype=float)
     ml_delay = round(_ensemble_predict(trained, x), 1)
     scoring = model.forecast_route(route, weight_t, storm, scenario)
     return {
-        "route_id": route["id"], "route_name": route["name"], "storm": storm,
+        "route_id": route["id"],
+        "route_name": route["name"],
+        "storm": storm,
         "features": feat,
         "ml_delay_h": max(0.0, ml_delay),
         "ml_model": "Ensemble: RandomForest (200 trees) + HistGradientBoosting",
@@ -276,6 +369,12 @@ def predict_delay(route: dict, weight_t: float, storm: bool = False,
         "difference_h": round(abs(ml_delay - scoring["delay_h"]), 1),
         "top_factors": trained["feature_importance"][:3],
         "local_attribution": _occlusion_attribution(trained, x),
+        "extrapolation": extrapolation(trained, x),
+        "analogs": l1_analogs(trained, x),
+        "analogs_kind": (
+            "synthetic demo analogs (kNN by MAD-scaled L1); "
+            "illustrative similar cases, not a precise predictor"
+        ),
     }
 
 
@@ -283,21 +382,24 @@ def info() -> dict:
     trained = get_trained()
     return {
         "trained_on": f"{trained['dataset']['n']} samples; wave/wind bootstrapped from "
-                      f"the REAL 90-day Open-Meteo marine archive for the "
-                      f"two sea legs (archive_weather.json); congestion and "
-                      f"customs still uniform — no open feed exists for them",
+        f"the REAL 90-day Open-Meteo marine archive for the "
+        f"two sea legs (archive_weather.json); congestion and "
+        f"customs still uniform — no open feed exists for them",
         "honest_note": "Экспериментальная модель. Метки задержек синтетические "
-                       "(правила коридора + шум): открытого датасета фактических "
-                       "задержек МТК «Север–Юг» нет. Метрики ниже — synthetic "
-                       "benchmark (качество воспроизведения генератора), НЕ точность "
-                       "прогноза реальных рейсов. Реальные данные подключаются через "
-                       f"CSV-контракт ({HISTORY_CSV_ENV}, docs/ML_DATA_CONTRACT.md) "
-                       "и сбор событий (POST /api/shipments/{id}/events).",
+        "(правила коридора + шум): открытого датасета фактических "
+        "задержек МТК «Север–Юг» нет. Метрики ниже — synthetic "
+        "benchmark (качество воспроизведения генератора), НЕ точность "
+        "прогноза реальных рейсов. Реальные данные подключаются через "
+        f"CSV-контракт ({HISTORY_CSV_ENV}, docs/ML_DATA_CONTRACT.md) "
+        "и сбор событий (POST /api/shipments/{id}/events).",
         "dataset": trained["dataset"],
-        "models": ["Ensemble: RandomForestRegressor (200 trees) + "
-                   "HistGradientBoostingRegressor",
-                   "LinearRegression (baseline)"],
-        "n_train": trained["n_train"], "n_test": trained["n_test"],
+        "models": [
+            "Ensemble: RandomForestRegressor (200 trees) + "
+            "HistGradientBoostingRegressor",
+            "LinearRegression (baseline)",
+        ],
+        "n_train": trained["n_train"],
+        "n_test": trained["n_test"],
         "metrics": trained["metrics"],
         "feature_importance": trained["feature_importance"],
         "features": FEATURES,
