@@ -15,12 +15,12 @@ What is real here (checked 12 Nov 2026):
   weather allows; Baku-Turkmenbashi ~17h, Kuryk-Baku <24h; waits of
   1-2 days are normal, up to a week at congestion (Wikivoyage,
   GetTransport 2026). Hence sailing_interval_h = 72.
-- CO2 factors: DESNZ 2026 (UK Government), well-to-wheel: rail
-  freight 32.74, RoRo ferry 63.28, articulated HGV 97.49 g/tkm.
-  Our sea legs are RoRo ferries — hence sea = 63, not 12.
-- Freight rates: Argus Caspian Transport, Oct 2025: Aktau-Iranian
-  ports $40-45/t, Astrakhan-Iranian ports $63-65/t. Sea rate 0.045
-  $/t-km reproduces ~$42/t for the 930 km Makhachkala-Amirabad leg.
+- CO2 factors: VERIFIED DESNZ 2026 flat file v1.2 (UK Government), WTW:
+  rail freight 25.83, RoRo ferry 51.58, articulated HGV 122.92 g CO2e/tkm.
+  UK proxy — indicative for RU/IR/KZ (see CO2_FACTOR_META, docs/RESEARCH.md).
+- Freight rates: ESTIMATES, order of magnitude consistent with Argus Caspian
+  Transport (Oct 2025: Aktau-Iranian ports $40-45/t, Astrakhan-Iranian
+  $63-65/t). Exact per-pair calibration not performed.
 
 Still demo (no live feed exists in the open): port congestion %,
 customs queues, shipment list. Swap in data.py only.
@@ -79,9 +79,31 @@ PORTS = {
     "enzeli": {"node": "enzeli", "congestion_pct": 30, "customs_queue_h": 4},
 }
 
-# CO2, g per tonne-km (DESNZ 2026, well-to-wheel).
-CO2_G_PER_TKM = {"rail": 33, "sea": 63, "road": 97}
-# Cost, USD per tonne-km (estimates; sea calibrated to Argus Oct 2025).
+# CO2e, g per tonne-km, well-to-wheel. VERIFIED against the official DESNZ
+# 2026 flat file v1.2 (31.07.2026), sheet "Freighting goods", Scope 3,
+# unit kg CO2e per tonne.km (total CO2e = CO2+CH4+N2O, GWP AR5):
+#   rail  0.02583  row 27_315_3151_14_1  (Freight train)
+#   sea   0.05158  rows 27_320_3239..3242_14_1 (Cargo ship / RoRo-Ferry Average)
+#   road  0.12292  row 27_304_3128_14_1  (Articulated HGV >3.5-33t, average laden)
+# The previously used 32.74/63.28/97.49 were NOT found in any DESNZ edition
+# 2023-2026 and were removed (see docs/RESEARCH.md, 12.11.2026).
+# Geography caveat: UK proxy (UK fleet/energy mix; sea = IMO 2009 international
+# averages) — indicative for RU/IR/KZ, not locally validated factors.
+CO2_G_PER_TKM = {"rail": 25.83, "sea": 51.58, "road": 122.92}
+CO2_FACTOR_META = {
+    "source": "DESNZ 2026 GHG conversion factors, flat file v1.2 (31.07.2026)",
+    "url": "https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2026",
+    "unit": "g CO2e per tonne-km (well-to-wheel, total CO2e, AR5)",
+    "rows": {"rail": "27_315_3151_14_1", "sea": "27_320_3239_14_1 (RoRo-Ferry Average)",
+             "road": "27_304_3128_14_1 (articulated HGV, average laden)"},
+    "scope": ("Только ход по плечам (tonne-km). Не учтены: терминальные операции, "
+              "перегрузка, холостые пробеги, производство топлива вне WTT-фактора. "
+              "UK proxy для РФ/Иран/КЗ; морские факторы — международные средние IMO 2009."),
+    "quality": "default factors, indicative estimate — not a verified ISO 14083 report",
+}
+# Cost, USD per tonne-km — ESTIMATES. Order of magnitude consistent with Argus
+# Caspian Transport (Oct 2025: Aktau-Iranian ports $40-45/t, Astrakhan-Iranian
+# $63-65/t); exact per-pair calibration not performed.
 COST_USD_PER_TKM = {"rail": 0.04, "sea": 0.045, "road": 0.12}
 
 # Real corridor numbers for the pitch (sources in README).

@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
@@ -285,6 +286,48 @@ def exceptions(storm: bool = False, close: str = "",
     return {"storm": storm, "exceptions": model.compute_exceptions(storm, scenario)}
 
 
+class EventCreate(BaseModel):
+    event_type: str = Field(pattern="^(departure|arrival|gate_in|gate_out|load|discharge|"
+                                  "customs_start|customs_done|delay|note)$")
+    leg_id: str | None = Field(None, max_length=30)
+    planned_ts: str | None = Field(None, max_length=40)
+    actual_ts: str | None = Field(None, max_length=40)
+    occurred_ts: str | None = Field(None, max_length=40)
+    source: str = Field(min_length=1, max_length=100)
+    location: str | None = Field(None, max_length=100)
+    mode: str | None = Field(None, pattern="^(rail|sea|road)$")
+    confidence: str | None = Field(None, max_length=30)
+    note: str | None = Field(None, max_length=300)
+    correction_of: str | None = Field(None, max_length=40)
+
+    @field_validator("planned_ts", "actual_ts", "occurred_ts")
+    @classmethod
+    def ts_iso(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            datetime.fromisoformat(v)
+        except ValueError:
+            raise ValueError("timestamp must be ISO 8601")
+        return v
+
+
+@app.post("/api/shipments/{shipment_id}/events", status_code=201,
+          dependencies=[Depends(guard_write)])
+def create_event(shipment_id: str, req: EventCreate):
+    """Ingestion path for ACTUAL shipment events (manual entry or adapter).
+    received_ts is stamped by the server; source is mandatory."""
+    try:
+        return model.add_shipment_event(shipment_id, **req.model_dump())
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/provenance")
+def provenance():
+    return {"sources": model.provenance()}
+
+
 class ClearanceRequest(BaseModel):
     shipment_id: str = Field(max_length=30)
     docs: dict[str, str] = Field(
@@ -342,19 +385,31 @@ def ml_info():
 
 @app.get("/api/ml/forecast")
 def ml_forecast(route_id: str, weight_t: float = WEIGHT_Q,
-                storm: bool = False):
+                storm: bool = False, close: str = "",
+                extra_customs_h: float = CUSTOMS_Q,
+                wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     route = data.get_route(route_id)
     if route is None:
         raise HTTPException(404, f"unknown route {route_id}")
-    return ml.predict_delay(route, weight_t, storm)
+    try:
+        return ml.predict_delay(route, weight_t, storm,
+                                _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 @app.get("/api/ml/shipment/{shipment_id}")
-def ml_shipment(shipment_id: str, storm: bool = False):
+def ml_shipment(shipment_id: str, storm: bool = False, close: str = "",
+                extra_customs_h: float = CUSTOMS_Q,
+                wave_m: float | None = WAVE_Q, wind_ms: float | None = WIND_Q):
     s = model.get_shipment_any(shipment_id)
     if s is None:
         raise HTTPException(404, f"unknown shipment {shipment_id}")
-    return ml.predict_delay(data.get_route(s["route_id"]), s["weight_t"], storm)
+    try:
+        return ml.predict_delay(data.get_route(s["route_id"]), s["weight_t"], storm,
+                                _parse_scenario(close, extra_customs_h, wave_m, wind_ms))
+    except ValueError as e:
+        raise HTTPException(422, str(e))
 
 
 # --- frontend ---

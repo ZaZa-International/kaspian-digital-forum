@@ -138,16 +138,20 @@ async function loadShipment() {
   const attr = mlp.local_attribution.map((a) =>
     `${a.feature}: ${a.contribution_h >= 0 ? "+" : ""}${a.contribution_h} ч`).join("; ");
   $("#ml-box").innerHTML =
-    `🤖 <b>ML-прогноз</b> (ансамбль RandomForest + HistGradientBoosting): ` +
+    `🤖 <b>ML-прогноз (эксперимент)</b> — ансамбль RandomForest + HistGradientBoosting: ` +
     `задержка <b>+${mlp.ml_delay_h} ч</b> против скоринга +${mlp.scoring_delay_h} ч ` +
     `(расхождение ${mlp.difference_h} ч). Разбор прогноза: ${esc(attr)}. ` +
     `Главные факторы глобально: ${esc(top)}. ` +
-    `<span class="hint">Обучена на реальных распределениях погоды (архив 90 дней); метки задержек — по правилам коридора.</span>`;
+    `<span class="hint">Метки задержек — синтетические (правила коридора + шум); волна/ветер — из реального архива Open-Meteo. Метрики — synthetic benchmark, не точность на реальных рейсах.</span>`;
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: "✅", in_progress: "🔄", planned: "⏳" };
-  $("#events-timeline").innerHTML = tl.events.map((e) => `
-    <li>${statusIcon[e.status] || ""} <b>${esc(e.title)}</b><br>
-    <span class="hint">${esc(e.time.slice(0, 16).replace("T", " "))}${esc(e.predicted_time ? " → прогноз " + e.predicted_time.slice(0, 16).replace("T", " ") : "")}</span><br>
+  const actualHtml = (tl.actual_events || []).map((e) => `
+    <li>📍 <b>${esc(e.title)}</b> <span class="pill ok">факт</span><br>
+    <span class="hint">${esc(fmtDT(e.time))} · источник: ${esc(e.source)}${e.location ? " · " + esc(e.location) : ""}</span><br>
+    <span class="why">${esc(e.note || "")}</span></li>`).join("");
+  $("#events-timeline").innerHTML = actualHtml + tl.events.map((e) => `
+    <li>${statusIcon[e.status] || ""} <b>${esc(e.title)}</b> <span class="hint">(модель)</span><br>
+    <span class="hint">${esc(fmtDT(e.time))}${e.predicted_time ? " → прогноз " + esc(fmtDT(e.predicted_time)) : ""}</span><br>
     <span class="why">${esc(e.detail || "")}</span></li>`).join("");
 }
 
@@ -211,6 +215,21 @@ async function loadLedger() {
     : `<li class="hint">Пока пусто — отправьте груз на pre-clearance.</li>`;
 }
 
+async function loadProvenance() {
+  try {
+    const data = await getJSON("/api/provenance");
+    const kindLabel = { live: "live", fallback: "fallback", historical: "исторические",
+                        demo: "демо", synthetic: "синтетика", static: "справочник",
+                        assumption: "допущение" };
+    $("#sources-list").innerHTML = data.sources.map((s) => `
+      <li><span class="pill ${s.kind === "live" ? "ok" : s.kind === "demo" || s.kind === "synthetic" ? "medium" : "ok"}">${esc(kindLabel[s.kind] || s.kind)}</span>
+      <b>${esc(s.what)}</b><br><span class="hint">${esc(s.source || "")}${s.license ? " · " + esc(s.license) : ""}${s.retrieved ? " · получено: " + esc(String(s.retrieved).slice(0, 16)) : ""}</span>
+      ${s.note ? `<br><span class="why">${esc(s.note)}</span>` : ""}</li>`).join("");
+  } catch (e) {
+    $("#sources-list").innerHTML = "<li class='hint'>Не удалось загрузить provenance.</li>";
+  }
+}
+
 async function loadCorridor() {
   const data = await getJSON("/api/corridor");
   $("#corridor-stats").innerHTML = data.stats.map((s) =>
@@ -270,7 +289,7 @@ function readScenarioInputs() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather(), initSearch(), loadExceptions()]);
+    await Promise.all([initMap(), loadCompare(), loadShipments(), loadCorridor(), loadPorts(), loadLiveWeather(), initSearch(), loadExceptions(), loadProvenance()]);
   } catch (e) {
     console.error(e);
     $("#verdict").textContent = "Не удалось загрузить данные API. Проверьте, что бэкенд запущен (./run.sh).";
@@ -324,6 +343,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
   $("#quote-btn").addEventListener("click", runQuote);
+  $("#event-btn").addEventListener("click", async () => {
+    const body = {
+      event_type: $("#event-type").value,
+      source: $("#event-source").value || "manual (demo)",
+      note: $("#event-note").value || null,
+      occurred_ts: new Date().toISOString(),
+      confidence: "manual entry",
+    };
+    try {
+      const res = await getJSON(`/api/shipments/${currentShipment}/events`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      $("#event-result").textContent = `✅ Событие ${res.event_type} записано (источник: ${res.source}).`;
+      $("#event-note").value = "";
+      await loadShipment();
+    } catch (e) {
+      $("#event-result").textContent = "Ошибка записи события: " + e.message;
+    }
+  });
   $("#clearance-btn").addEventListener("click", async () => {
     const refs = {};
     document.querySelectorAll(".doc-ref").forEach((inp) => {

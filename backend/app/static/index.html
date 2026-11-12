@@ -42,7 +42,7 @@
     <div id="map"></div>
     <p class="hint">Карта — схема: прямые сегменты между узлами, не фактический путь судна/поезда. Выбранный маршрут поиска подсвечен красным пунктиром (клик по карточке маршрута меняет выбор).</p>
     <table class="routes" id="compare-table">
-      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>P90 симуляции*</th><th>Задержка</th><th>Индекс риска*</th><th>CO₂</th><th>Стоимость**</th><th></th></tr></thead>
+      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>P90 симуляции*</th><th>Задержка</th><th>Индекс риска*</th><th>CO₂e</th><th>Стоимость**</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="hint">* Индекс риска — эвристика по величине задержки, не эмпирическая вероятность. P90 — квантиль симуляции (Monte Carlo, 200 прогонов: волна/ветер из реального архива Open-Meteo, загруженность/таможня — синтетические вокруг демо-снимка), не гарантия фактической доставки. Время в пути = ход + ожидание парома (допущение: интервал ~72 ч, расписания нет) + задержки. ** Оценка по ставкам $/т-км (ж/д 0,04 · море 0,045 · авто 0,12; море калибровано по Argus, окт 2025). CO₂ — оценка по DESNZ 2026 (UK proxy).</p>
@@ -132,6 +132,22 @@
       <p class="hint" id="create-result"></p>
       <ol class="timeline" id="timeline"></ol>
       <h3>События перевозки</h3>
+      <p class="hint">📍 Фактические события (демо-симуляция или введённые вручную) + модельный таймлайн план/прогноз. Это не live GPS/AIS-трекинг.</p>
+      <div class="sim-controls">
+        <label>Тип:
+          <select id="event-type">
+            <option value="departure">Отправление</option>
+            <option value="arrival">Прибытие</option>
+            <option value="customs_done">Таможня завершена</option>
+            <option value="delay">Задержка</option>
+            <option value="note">Заметка</option>
+          </select>
+        </label>
+        <label>Источник: <input type="text" id="event-source" value="manual (demo)" style="width:100%"></label>
+        <label>Заметка: <input type="text" id="event-note" placeholder="напр. вагон подан под погрузку" style="width:100%"></label>
+        <button id="event-btn" class="primary">Добавить факт</button>
+      </div>
+      <p class="hint" id="event-result"></p>
       <ol class="timeline" id="events-timeline"></ol>
       <p class="verdict" id="verdict">…</p>
       <p class="ml-box" id="ml-box">ML-прогноз загружается…</p>
@@ -148,14 +164,9 @@
   </section>
 
   <section class="card" id="sources">
-    <h2>Откуда факторы модели</h2>
-    <ul class="sources">
-      <li>Узлы коридора — порты Астрахань, Махачкала, Актау, Баку, Амирабад, Энзели (из текста кейса №2).</li>
-      <li>Погода на море — <b>живая</b> (Open-Meteo marine API, кэш 30 мин); архив 90 дней — в <code>archive_weather.json</code>, на нём дообучена ML-модель.</li>
-      <li>Паромы Каспия без расписания: рейс Баку–Туркменбаши ~17 ч, Курык–Баку &lt;24 ч, ожидание 1–2 дня — норма (Wikivoyage, GetTransport 2026).</li>
-      <li>CO₂ — DESNZ 2026: ж/д 33, паром RoRo 63, фура 97 г/т-км. Ставки моря — Argus, окт 2025.</li>
-      <li>Загруженность портов и очереди на таможне — демо-снимок, а не live-данные.</li>
-    </ul>
+    <h2>Откуда данные: provenance</h2>
+    <p class="hint">Каждый факт маркирован: live / исторические / демо / синтетика / допущение. Погода: Open-Meteo (CC BY 4.0, non-commercial free tier). Подробно — docs/RESEARCH.md и docs/DATA_SOURCES.md.</p>
+    <ul class="sources" id="sources-list"><li class="hint">Загружается…</li></ul>
   </section>
 </main>
 

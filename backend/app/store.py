@@ -61,6 +61,22 @@ CREATE TABLE IF NOT EXISTS documents (
     decided_at TEXT,
     PRIMARY KEY (shipment_id, doc_type)
 );
+CREATE TABLE IF NOT EXISTS events (
+    id TEXT PRIMARY KEY,
+    shipment_id TEXT NOT NULL,
+    leg_id TEXT,
+    event_type TEXT NOT NULL,
+    planned_ts TEXT,
+    actual_ts TEXT,
+    occurred_ts TEXT,
+    received_ts TEXT NOT NULL,
+    source TEXT NOT NULL,
+    location TEXT,
+    mode TEXT,
+    confidence TEXT,
+    note TEXT,
+    correction_of TEXT
+);
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
@@ -360,6 +376,48 @@ def clear_documents() -> None:
         conn.execute("DELETE FROM documents")
 
 
+# --- Shipment events (DCSA T&T-inspired): actual facts vs model timeline.
+EVENT_TYPES = ("departure", "arrival", "gate_in", "gate_out", "load", "discharge",
+               "customs_start", "customs_done", "delay", "note")
+
+
+def add_event(*, shipment_id: str, event_type: str, leg_id: str | None = None,
+              planned_ts: str | None = None, actual_ts: str | None = None,
+              occurred_ts: str | None = None, source: str,
+              location: str | None = None, mode: str | None = None,
+              confidence: str | None = None, note: str | None = None,
+              correction_of: str | None = None, event_id: str | None = None) -> dict:
+    import uuid
+    if event_type not in EVENT_TYPES:
+        raise ValueError(f"invalid event_type {event_type}")
+    eid = event_id or uuid.uuid4().hex
+    received = datetime.now(timezone.utc).isoformat()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO events (id,shipment_id,leg_id,event_type,planned_ts,actual_ts,"
+            "occurred_ts,received_ts,source,location,mode,confidence,note,correction_of) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (eid, shipment_id, leg_id, event_type, planned_ts, actual_ts, occurred_ts,
+             received, source, location, mode, confidence, note, correction_of))
+    return {"id": eid, "shipment_id": shipment_id, "leg_id": leg_id,
+            "event_type": event_type, "planned_ts": planned_ts, "actual_ts": actual_ts,
+            "occurred_ts": occurred_ts, "received_ts": received, "source": source,
+            "location": location, "mode": mode, "confidence": confidence,
+            "note": note, "correction_of": correction_of}
+
+
+def list_events(shipment_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM events WHERE shipment_id=? "
+                            "ORDER BY COALESCE(occurred_ts, received_ts)", (shipment_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def clear_events() -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM events")
+
+
 def reset_demo() -> dict:
     """Clear user-created runtime state; static seed data is untouched."""
     with _conn() as conn:
@@ -368,4 +426,5 @@ def reset_demo() -> dict:
         conn.execute("DELETE FROM shipments")
         conn.execute("DELETE FROM ledger")
         conn.execute("DELETE FROM documents")
+        conn.execute("DELETE FROM events")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

@@ -25,8 +25,10 @@ import numpy as np
 from app import data, store, weather
 
 MODE_RU = {"rail": "ж/д", "sea": "море", "road": "авто"}
-CO2_METHOD = ("ISO 14083 / GLEC v3.2, well-to-wheel, default factors "
-              "(DESNZ 2026); hub operations not included — no primary data")
+CO2_METHOD = ("Оценка по методологии, согласованной с ISO 14083 / GLEC v3.3 "
+              "(без верификации). Факторы DESNZ 2026 WTW (UK proxy): ж/д 25,83, "
+              "паром RoRo 51,58, авто 122,92 г CO2e/т-км. Не учтены: терминальные "
+              "операции, перегрузка, холостые пробеги.")
 
 
 def _weather(sea: str, storm: bool) -> dict:
@@ -123,8 +125,8 @@ def predict_leg(leg: dict, storm: bool, scenario: dict | None = None) -> dict:
     out = {**leg, "predicted_h": round(leg["base_h"] + wait_h + delay, 1),
            "wait_h": wait_h, "delay_h": delay, "reasons": reasons,
            "risk": "high" if delay >= 12 else "medium" if delay >= 5 else "low",
-           "co2_kg": round(leg["distance_km"] * data.CO2_G_PER_TKM[mode] / 1000, 1),
-           "cost_usd": round(leg["distance_km"] * data.COST_USD_PER_TKM[mode], 2)}
+           "co2_kg_per_t": round(leg["distance_km"] * data.CO2_G_PER_TKM[mode] / 1000, 2),
+           "cost_usd_per_t": round(leg["distance_km"] * data.COST_USD_PER_TKM[mode], 2)}
     if mode == "sea":
         out["weather"] = {"wave_m": wave, "wind_ms": wind, "source": w["source"]}
         out["sailing_window"] = {
@@ -235,14 +237,16 @@ def forecast_route(route: dict, weight_t: float, storm: bool = False,
         "delay_probability_kind": "heuristic index (not an empirical probability)",
         "bottleneck_leg_id": bottleneck["id"],
         "co2_kg": co2_kg, "cost_usd": cost_usd,
+        "co2_unit": "kg CO2e (total, AR5)", "cost_unit": "USD (estimate)",
         "co2_method": CO2_METHOD,
+        "co2_factor_meta": data.CO2_FACTOR_META,
         "co2_breakdown": [
             {"leg_id": l["id"], "mode": l["mode"],
              "from": data.NODES[l["from"]]["name"], "to": data.NODES[l["to"]]["name"],
              "distance_km": l["distance_km"],
              "co2_kg": round(_leg_weight_co2(l, weight_t)),
              "factor_g_per_tkm": data.CO2_G_PER_TKM[l["mode"]],
-             "data_quality": "default (DESNZ 2026)"}
+             "data_quality": "default (DESNZ 2026, UK proxy — indicative)"}
             for l in legs],
         "monte_carlo": mc,
         "eta_p50_h": mc["eta_p50_h"], "eta_p90_h": mc["eta_p90_h"],
@@ -428,10 +432,52 @@ def ledger_last_hash() -> str:
 
 
 # --- Digital twin: event timeline for a shipment.
+EVENT_RU = {"departure": "Отправление", "arrival": "Прибытие", "gate_in": "Въезд на терминал",
+            "gate_out": "Выезд с терминала", "load": "Погрузка", "discharge": "Выгрузка",
+            "customs_start": "Таможня: начало", "customs_done": "Таможня: завершено",
+            "delay": "Задержка", "note": "Событие"}
+
+
+def _seed_demo_events(shipment: dict) -> None:
+    """Demo actual-event log for seed shipments (labelled simulation, NOT telemetry)."""
+    if shipment["id"] not in {s["id"] for s in data.SHIPMENTS}:
+        return
+    if store.list_events(shipment["id"]):
+        return
+    route = data.get_route(shipment["route_id"])
+    try:
+        eta = datetime.fromisoformat(shipment["eta"])
+    except ValueError:
+        return
+    t = eta - timedelta(hours=sum(l["base_h"] for l in route["legs"]))
+    for i, leg in enumerate(route["legs"]):
+        if i > shipment["current_leg"]:
+            break
+        store.add_event(shipment_id=shipment["id"], event_type="departure", leg_id=leg["id"],
+                        planned_ts=t.isoformat(), actual_ts=t.isoformat(), occurred_ts=t.isoformat(),
+                        source="demo-simulation", location=data.NODES[leg["from"]]["name"],
+                        mode=leg["mode"], confidence="demo",
+                        note="Демо-симуляция, не GPS/AIS/телематрия")
+        t += timedelta(hours=leg["base_h"])
+        if i < shipment["current_leg"]:
+            store.add_event(shipment_id=shipment["id"], event_type="arrival", leg_id=leg["id"],
+                            planned_ts=t.isoformat(), actual_ts=t.isoformat(), occurred_ts=t.isoformat(),
+                            source="demo-simulation", location=data.NODES[leg["to"]]["name"],
+                            mode=leg["mode"], confidence="demo",
+                            note="Демо-симуляция, не GPS/AIS/телематрия")
+
+
+def add_shipment_event(shipment_id: str, **fields) -> dict:
+    if get_shipment_any(shipment_id) is None:
+        raise ValueError(f"unknown shipment {shipment_id}")
+    return store.add_event(shipment_id=shipment_id, **fields)
+
+
 def shipment_timeline(shipment: dict, storm: bool = False,
                       scenario: dict | None = None) -> dict:
     route = data.get_route(shipment["route_id"])
     fc = forecast_route(route, shipment["weight_t"], storm, scenario)
+    _seed_demo_events(shipment)
     try:
         eta = datetime.fromisoformat(shipment["eta"])
     except ValueError:
@@ -483,10 +529,17 @@ def shipment_timeline(shipment: dict, storm: bool = False,
                    if last else "не подавался"),
         "status": "done" if last and last["decision"] == "pre-cleared" else "planned",
     })
+    for e in events:
+        e["kind"] = "model"
+    actual = [{**ev, "kind": "actual",
+               "title": f"{EVENT_RU.get(ev['event_type'], ev['event_type'])} (факт)",
+               "time": ev["occurred_ts"] or ev["received_ts"]}
+              for ev in store.list_events(shipment["id"])]
     return {"shipment_id": shipment["id"], "route_id": route["id"],
             "planned_eta": eta.isoformat(),
             "predicted_eta": t_pred.isoformat(),
-            "events": events}
+            "timeline_kind": "model (план/прогноз) + actual events (демо-симуляция или введённые факты)",
+            "events": events, "actual_events": actual}
 
 
 # --- Exceptions feed (project44-style): event -> impact -> action.
@@ -569,3 +622,52 @@ def compute_exceptions(storm: bool = False, scenario: dict | None = None) -> lis
             })
     order = {"high": 0, "medium": 1, "low": 2}
     return sorted(out, key=lambda e: order[e["severity"]])
+
+
+# --- Data provenance: every fact labelled by kind and source.
+def provenance() -> list[dict]:
+    live = weather.get_live_weather()
+    return [
+        {"id": "weather_live", "kind": "live" if live["live"] else "fallback",
+         "what": "Волна/ветер на морских плечах (кэш 30 мин)",
+         "source": "Open-Meteo marine + forecast API",
+         "license": "CC BY 4.0; free tier — только non-commercial",
+         "retrieved": live["fetched_at"],
+         "note": "Атрибуция: Weather data by Open-Meteo.com. Fallback — демо-снимок."},
+        {"id": "weather_archive", "kind": "historical",
+         "what": "90-дневный архив волны/ветра для bootstrap (Monte Carlo, ML)",
+         "source": "Open-Meteo archive API, 2026-08-14..2026-11-11",
+         "license": "CC BY 4.0", "retrieved": "2026-11-12",
+         "note": "Прорежен каждый 6-й час (364 точки/сегмент); статистики в метаданных — по полному архиву."},
+        {"id": "ports", "kind": "demo",
+         "what": "Загруженность портов и таможенные очереди",
+         "source": "Демо-снимок (открытого live-фида нет)", "retrieved": "2026-11-12",
+         "note": "Замена — data.PORTS; снапшоты portkuryk.kz / ships.asco.az — без открытой лицензии (docs/RESEARCH.md)."},
+        {"id": "corridor_stats", "kind": "static",
+         "what": "Грузопоток коридора, порт Махачкала",
+         "source": "Правительство РФ / РЖД / Росморречфлот через прессу, окт 2026",
+         "retrieved": "2026-11-12", "note": "Первичные сайты недоступны (403) — верифицировано через СМИ."},
+        {"id": "co2_factors", "kind": "static",
+         "what": "Факторы CO2e по видам транспорта", **data.CO2_FACTOR_META},
+        {"id": "cost_rates", "kind": "assumption",
+         "what": "Ставки $/т-км", "source": "Оценка; порядок величины — Argus Caspian Transport, окт 2025",
+         "note": "Точная калибровка по паре портов не выполнена."},
+        {"id": "ferry_wait", "kind": "assumption",
+         "what": "Ожидание парома ~interval/2 (интервал 72 ч), пропуск рейса +48 ч при волне ≥ 2 м",
+         "source": "Caravanistan (06.2026), Wikivoyage, снапшот ships.asco.az (12.11.2026)",
+         "note": "Фиксированного расписания нет; ожидание — допущение, Monte Carlo сэмплирует Uniform(0, 72)."},
+        {"id": "conditional_legs", "kind": "assumption",
+         "what": "Условные плечи: Махачкала–Амирабад/Энзели, Актау–Бендер-Аббас (KTI)",
+         "source": "docs/RESEARCH.md: регулярные линии не подтверждены / маршрут абстрактный",
+         "note": "Маркируются conditional=true в API и UI."},
+        {"id": "shipments_seed", "kind": "demo",
+         "what": "Грузы SHP-1042..1044, их статусы и ETA",
+         "source": "Демо-набор; события — demo-simulation, не телеметрия"},
+        {"id": "ml_labels", "kind": "synthetic",
+         "what": "Метки задержек для обучения ML",
+         "source": "Правила коридора + гауссов шум (генератор ml.py)",
+         "note": "Метрики — synthetic benchmark, не точность на реальных рейсах. Реальные данные: CSV-контракт + POST /api/shipments/{id}/events."},
+        {"id": "distances", "kind": "assumption",
+         "what": "Расстояния плеч", "source": "Haversine по координатам ×1.1 (море); ж/д/авто — оценки",
+         "note": "Не фактические тарифные километражи."},
+    ]

@@ -22,7 +22,13 @@ Train once at import (fast: <2 s for 800 rows).
 """
 from __future__ import annotations
 
+import csv
+import hashlib
+import os
+from pathlib import Path
+
 import numpy as np
+import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, r2_score
@@ -34,6 +40,9 @@ FEATURES = ["max_wave_m", "max_wind_ms", "max_congestion_pct",
             "total_customs_h", "sea_km", "rail_km", "weight_t", "sea_legs"]
 N_SAMPLES = 800
 RANDOM_STATE = 42
+HISTORY_CSV_ENV = "SCT_ML_HISTORY_CSV"
+CSV_REQUIRED = FEATURES + ["delay_h"]
+CSV_OPTIONAL_TS = "departed_at"
 
 _TRAINED: dict | None = None
 
@@ -87,14 +96,71 @@ def _sample_history(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
     return np.array(X, dtype=float), np.array(y, dtype=float)
 
 
+def load_history_csv(path: str | Path) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Real-history CSV contract (see docs/ML_DATA_CONTRACT.md).
+
+    Required columns: the 8 FEATURES + delay_h (actual observed delay, hours).
+    Optional departed_at (ISO timestamp) enables a chronological split.
+    Rows must be numeric; delay_h >= 0. Raises ValueError on bad input —
+    never silently trains on malformed data."""
+    path = Path(path)
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        cols = reader.fieldnames or []
+        missing = [c for c in CSV_REQUIRED if c not in cols]
+        if missing:
+            raise ValueError(f"history CSV missing columns: {missing}")
+        rows = list(reader)
+    if not rows:
+        raise ValueError("history CSV is empty")
+    X, y, ts = [], [], []
+    for i, r in enumerate(rows):
+        try:
+            X.append([float(r[c]) for c in FEATURES])
+            d = float(r["delay_h"])
+        except (TypeError, ValueError):
+            raise ValueError(f"history CSV row {i + 2}: non-numeric value")
+        if d < 0:
+            raise ValueError(f"history CSV row {i + 2}: negative delay_h")
+        y.append(d)
+        ts.append(r.get(CSV_OPTIONAL_TS) or "")
+    meta = {"n": len(rows), "has_timestamps": all(ts),
+            "source": str(path)}
+    return np.array(X, dtype=float), np.array(y, dtype=float), meta
+
+
+def _dataset_hash(X: np.ndarray, y: np.ndarray) -> str:
+    return hashlib.sha256(X.tobytes() + y.tobytes()).hexdigest()[:16]
+
+
 def _fit() -> dict:
     """Fit RF + HistGradientBoosting + LinearRegression baseline.
-    Swap _sample_history for a real CSV read here later — everything
-    downstream stays the same."""
-    rng = np.random.default_rng(RANDOM_STATE)
-    X, y = _sample_history(rng)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=RANDOM_STATE)
+
+    Data source: SCT_ML_HISTORY_CSV (real observed outcomes, CSV contract)
+    or the built-in SYNTHETIC generator (rule labels + noise; wave/wind
+    bootstrapped from the real Open-Meteo archive). The synthetic benchmark
+    measures how well models learn the generator — NOT real-world accuracy."""
+    csv_path = os.environ.get(HISTORY_CSV_ENV, "")
+    if csv_path:
+        X, y, meta = load_history_csv(csv_path)
+        dataset_kind = "csv (user-provided; verify provenance before claiming real-world accuracy)"
+        if meta["has_timestamps"]:
+            order = np.argsort([r for r in _csv_timestamps(csv_path)])
+            X, y = X[order], y[order]
+            cut = int(len(X) * 0.8)
+            X_train, X_test, y_train, y_test = X[:cut], X[cut:], y[:cut], y[cut:]
+            split = "chronological 80/20 (by departed_at)"
+        else:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=RANDOM_STATE)
+            split = "random 80/20 (no timestamps in CSV)"
+    else:
+        rng = np.random.default_rng(RANDOM_STATE)
+        X, y = _sample_history(rng)
+        dataset_kind = "synthetic (rule-generated labels + Gaussian noise)"
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=RANDOM_STATE)
+        split = "random 80/20 (synthetic i.i.d. samples)"
     rf = RandomForestRegressor(n_estimators=200, random_state=RANDOM_STATE, n_jobs=-1)
     rf.fit(X_train, y_train)
     hgb = HistGradientBoostingRegressor(random_state=RANDOM_STATE)
@@ -113,6 +179,11 @@ def _fit() -> dict:
     return {
         "rf": rf, "hgb": hgb, "lr": lr, "medians": medians,
         "n_train": len(X_train), "n_test": len(X_test),
+        "dataset": {
+            "kind": dataset_kind, "hash": _dataset_hash(X, y),
+            "n": len(X), "split": split, "seed": RANDOM_STATE,
+            "versions": {"scikit-learn": sklearn.__version__, "numpy": np.__version__},
+        },
         "metrics": {
             "random_forest": _metrics(pred_rf),
             "hist_gradient_boosting": _metrics(pred_hgb),
@@ -124,6 +195,11 @@ def _fit() -> dict:
              for f, v in zip(FEATURES, rf.feature_importances_)),
             key=lambda d: -d["importance"]),
     }
+
+
+def _csv_timestamps(path: str) -> list[str]:
+    with open(path, newline="", encoding="utf-8") as f:
+        return [r.get(CSV_OPTIONAL_TS) or "" for r in csv.DictReader(f)]
 
 
 def _ensemble_predict(trained: dict, x: np.ndarray) -> float:
@@ -151,36 +227,49 @@ def get_trained() -> dict:
     return _TRAINED
 
 
-def route_features(route: dict, weight_t: float, storm: bool) -> dict:
+def route_features(route: dict, weight_t: float, storm: bool,
+                   scenario: dict | None = None) -> dict:
+    """Same scenario semantics as the scoring model (model._sea_weather):
+    explicit wave/wind > storm > live; customs extra on every leg; closed
+    nodes raise ValueError."""
+    scenario = scenario or {}
     wave, wind, cong, customs, sea_km, rail_km, sea_legs = 0.0, 0.0, 0, 0, 0, 0, 0
     for leg in route["legs"]:
+        if leg["from"] in scenario.get("closed_nodes", []) or \
+                leg["to"] in scenario.get("closed_nodes", []):
+            raise ValueError(f"leg {leg['id']} blocked: node closed by scenario")
         if leg["mode"] == "sea":
             sea_legs += 1
             sea_km += leg["distance_km"]
-            w = weather.current_sea_state(leg["sea"], storm)
+            w = model._sea_weather(leg, storm, scenario)
             wave = max(wave, w["wave_m"])
             wind = max(wind, w["wind_ms"])
         elif leg["mode"] == "rail":
             rail_km += leg["distance_km"]
         if leg.get("port"):
-            cong = max(cong, data.PORTS.get(leg["port"], {}).get("congestion_pct", 0))
-        customs += leg.get("customs_h", 0)
+            c = scenario.get("congestion", {}).get(leg["port"])
+            if c is None:
+                c = data.PORTS.get(leg["port"], {}).get("congestion_pct", 0)
+            cong = max(cong, c)
+        customs += leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
     return {"max_wave_m": wave, "max_wind_ms": wind, "max_congestion_pct": cong,
             "total_customs_h": customs, "sea_km": sea_km, "rail_km": rail_km,
             "weight_t": weight_t, "sea_legs": sea_legs}
 
 
-def predict_delay(route: dict, weight_t: float, storm: bool = False) -> dict:
+def predict_delay(route: dict, weight_t: float, storm: bool = False,
+                  scenario: dict | None = None) -> dict:
     trained = get_trained()
-    feat = route_features(route, weight_t, storm)
+    feat = route_features(route, weight_t, storm, scenario)
     x = np.array([[feat[f] for f in FEATURES]], dtype=float)
     ml_delay = round(_ensemble_predict(trained, x), 1)
-    scoring = model.forecast_route(route, weight_t, storm)
+    scoring = model.forecast_route(route, weight_t, storm, scenario)
     return {
         "route_id": route["id"], "route_name": route["name"], "storm": storm,
         "features": feat,
         "ml_delay_h": max(0.0, ml_delay),
         "ml_model": "Ensemble: RandomForest (200 trees) + HistGradientBoosting",
+        "label_kind": trained["dataset"]["kind"],
         "rf_delay_h": round(float(trained["rf"].predict(x)[0]), 1),
         "hgb_delay_h": round(float(trained["hgb"].predict(x)[0]), 1),
         "scoring_delay_h": scoring["delay_h"],
@@ -193,16 +282,18 @@ def predict_delay(route: dict, weight_t: float, storm: bool = False) -> dict:
 def info() -> dict:
     trained = get_trained()
     return {
-        "trained_on": f"{N_SAMPLES} shipments; wave/wind bootstrapped from "
+        "trained_on": f"{trained['dataset']['n']} samples; wave/wind bootstrapped from "
                       f"the REAL 90-day Open-Meteo marine archive for the "
                       f"two sea legs (archive_weather.json); congestion and "
                       f"customs still uniform — no open feed exists for them",
-        "honest_note": "Labels are still rule-based (corridor rules + "
-                       "Gaussian noise): there is no public dataset of "
-                       "actual North-South delays. What is real now: the "
-                       "weather distributions the model trains on. The "
-                       "pipeline takes a real history CSV without code "
-                       "changes.",
+        "honest_note": "Экспериментальная модель. Метки задержек синтетические "
+                       "(правила коридора + шум): открытого датасета фактических "
+                       "задержек МТК «Север–Юг» нет. Метрики ниже — synthetic "
+                       "benchmark (качество воспроизведения генератора), НЕ точность "
+                       "прогноза реальных рейсов. Реальные данные подключаются через "
+                       f"CSV-контракт ({HISTORY_CSV_ENV}, docs/ML_DATA_CONTRACT.md) "
+                       "и сбор событий (POST /api/shipments/{id}/events).",
+        "dataset": trained["dataset"],
         "models": ["Ensemble: RandomForestRegressor (200 trees) + "
                    "HistGradientBoostingRegressor",
                    "LinearRegression (baseline)"],
