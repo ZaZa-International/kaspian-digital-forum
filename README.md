@@ -80,9 +80,10 @@ pre-clearance до прибытия груза и альтернативные �
 ## Стек
 
 Python 3.12 + FastAPI + Uvicorn, scikit-learn/numpy (ML), SQLite (WAL)
-для runtime-состояния. Статический фронт (HTML/CSS/JS, Leaflet вендорен
-локально — без npm, без сборки и без CDN). PWA (service worker, manifest,
-офлайн-режим). Docker (non-root, volume, healthcheck).
+для runtime-состояния. Статический фронт (HTML/CSS/JS, Leaflet и шрифты
+IBM Plex Sans / JetBrains Mono вендорены локально — без npm, без сборки
+и без CDN). Дизайн-контракт редизайна — `docs/DESIGN_CONTRACT.md`.
+PWA (service worker, manifest, офлайн-режим). Docker (non-root, volume, healthcheck).
 
 ## Запуск
 
@@ -277,7 +278,7 @@ API-документация: http://localhost:8000/docs
 │   │   ├── data/              # sct.db (runtime, в .gitignore)
 │   │   └── static/            # index.html, styles.css, app.js, sw.js,
 │   │       │                  # manifest.json, иконки 192/512 (PWA)
-│   │       └── vendor/        # Leaflet локально (CSS/JS/маркеры)
+│   │       └── vendor/        # Leaflet + fonts.css/woff2 локально
 │   └── tests/                 # 82 теста: api, routing, scenarios, clearance,
 │                              # store, security, ml, events, co2, weather
 └── docs/
@@ -285,6 +286,7 @@ API-документация: http://localhost:8000/docs
     ├── RESEARCH.md            # верифицированное исследование источников
     ├── DATA_SOURCES.md        # источники данных и их качество
     ├── ARCHITECTURE.md        # архитектура и решения
+    ├── DESIGN_CONTRACT.md     # дизайн-контракт редизайна «Caspian Ops»
     ├── ML_METHODOLOGY.md      # ML: данные, метрики, объяснимость
     ├── ML_DATA_CONTRACT.md    # CSV-контракт реальных историй
     ├── ENGINEERING_LOG.md     # журнал итераций и циклов улучшений

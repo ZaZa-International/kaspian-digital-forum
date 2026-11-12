@@ -159,3 +159,43 @@ DATA_SOURCES, ML_METHODOLOGY, PITCH, DEMO_RUNBOOK, PLAN, ROADMAP):
 **Осталось до защиты:** репетиция питча по PITCH.md (ровно 3:00) и
 DEMO_RUNBOOK.md (3–5 мин) с таймером, скриншоты на случай офлайна,
 финальная заморозка. Новых фич не начинать.
+
+---
+
+## Iter 7 — редизайн «Caspian Ops» (12.11.2026, вечер)
+
+Полный редизайн фронта по дизайн-контракту `docs/DESIGN_CONTRACT.md`
+(пайплайн frontend-pipeline: brief → contract → implementation →
+visual review → final check). Направление: диспетчерский пульт
+логистического SaaS — стиль Data-Dense Dashboard, палитра
+Logistics/Delivery (ui-ux-pro-max), пара IBM Plex Sans + JetBrains Mono
+(кириллица, вендорены локально — CDN по-прежнему нет).
+
+- `index.html`: navy appbar со scrollspy-навигацией, нумерованные секции
+  01–07, inline-SVG спрайт иконок (эмодзи удалены полностью), skip-link,
+  aria-live у результатов, легенда маршрутов с фокусом на карте.
+- `styles.css`: трёхслойные токены (primitive → semantic → component),
+  один радиус 6px, шаг 4px, type ratio 1.200; тени только у попапов;
+  прямоугольные чипы статусов; tabular-nums во всех числовых колонках.
+- `app.js`: цвета маршрутов/графиков из CSS-токенов, busy-состояния
+  кнопок (aria-busy, защита от двойных кликов), автозапуск поиска при
+  загрузке, фокус маршрута из легенды/таблицы; API-логика и esc() сохранены.
+- PWA: кэш `sct-static-v6` (+шрифты), manifest/theme под новую палитру,
+  иконки 192/512 перегенерированы (якорь на navy).
+- `conftest.py`: `SCT_DATA_DIR` во временный каталог до импорта app —
+  pytest больше не трогает live-демо БД (раньше гонка давала 500 на
+  `/api/exceptions` при параллельном прогоне).
+
+**Проверки (12.11.2026, вечер):**
+- `pytest -q`: **97 passed**; `node --check app.js` — OK; live-БД после
+  прогонов содержит только seed (3 груза).
+- Playwright MCP: desktop 1440×900 и mobile 390×844, **4 итерации**
+  визуального ревью (`.playwright-mcp/redesign-*`); консоль 0 errors /
+  0 warnings на обоих viewport; горизонтального overflow нет.
+- Интерактив в браузере: шторм-тумблер (полоса предупреждения, KPI
+  +19.7 → +60.4 ч и обратно), поиск (3 маршрута, выбор на карте),
+  создание груза → событие → pre-clearance (запись реестра, 4 verified),
+  сброс демо возвращает seed; повторные переключения стабильны.
+- Клавиатура: skip-link, focus-visible 2px ring; touch targets 44px.
+- Контраст WCAG AA: 21 текстовая/графическая пара — ALL PASS (≥4.5:1
+  текст, ≥3:1 графика), включая мета-текст на tint-поверхностях.

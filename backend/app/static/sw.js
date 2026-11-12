@@ -1,10 +1,15 @@
 /* Offline cache for static assets only (never API responses).
-   v5: network-first for the app shell (HTML, app.js, styles.css) so fresh
-   deployments are never hidden by a stale cache; cache-first for vendor
-   assets; explicit offline fallback. */
-const CACHE = "sct-static-v5";
+   v6: «Caspian Ops» redesign — network-first for the app shell (HTML, app.js,
+   styles.css) so fresh deployments are never hidden by a stale cache;
+   cache-first for vendor assets incl. self-hosted fonts; offline fallback. */
+const CACHE = "sct-static-v6";
 const ASSETS = ["/", "/static/styles.css", "/static/app.js",
                 "/static/manifest.json", "/static/icon-192.png", "/static/icon-512.png",
+                "/static/vendor/fonts.css",
+                "/static/vendor/fonts/ibm-plex-sans-cyrillic.woff2",
+                "/static/vendor/fonts/ibm-plex-sans-latin.woff2",
+                "/static/vendor/fonts/jetbrains-mono-cyrillic.woff2",
+                "/static/vendor/fonts/jetbrains-mono-latin.woff2",
                 "/static/vendor/leaflet.js", "/static/vendor/leaflet.css",
                 "/static/vendor/images/marker-icon.png",
                 "/static/vendor/images/marker-icon-2x.png",

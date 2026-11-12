@@ -3,188 +3,328 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#06283d">
+<meta name="theme-color" content="#0B1626">
+<meta name="description" content="Предиктивный цифровой двойник мультимодального хаба МТК «Север–Юг»: прогноз задержек, сравнение маршрутов, pre-clearance.">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <link rel="manifest" href="/static/manifest.json">
 <title>Smart Caspian Transit — цифровой двойник хаба «Север–Юг»</title>
+<link rel="stylesheet" href="/static/vendor/fonts.css">
 <link rel="stylesheet" href="/static/vendor/leaflet.css">
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-<div id="offline-banner" class="offline-banner" hidden>⚠ Офлайн: API недоступен — показаны закэшированные оболочки страниц, данные могут быть неактуальны. Карта без тайлов.</div>
-<header class="top">
-  <div class="wrap">
-    <h1><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.2"/><path d="M12 7.2V21M5 12H2a10 10 0 0 0 20 0h-3"/></svg></span>Smart Caspian Transit</h1>
-    <p class="sub">Предиктивный цифровой двойник мультимодального хаба МТК «Север–Юг» — Москва → Бендер-Аббас через Каспий</p>
-    <p class="badge">⚠️ Демо-данные: загруженность портов и очереди на таможне — иллюстративные; погода — живая (Open-Meteo); ML — эксперимент на синтетических метках. <a href="#sources">Источники и provenance</a></p>
-    <nav class="quick-nav" aria-label="Быстрые переходы">
-      <a href="#twin">Груз</a><a href="#exceptions-card">Риски</a><a href="#search-card">Маршруты</a><a href="#clearance-card">Документы</a><a href="#sources">Источники</a>
+<!-- Icon sprite: stroke geometry, 24×24, rendered via <use>. No emoji anywhere. -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-anchor" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><path d="M12 22V8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></symbol>
+  <symbol id="i-ship" viewBox="0 0 24 24"><path d="M2 21c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1s1.2 1 2.5 1c2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M19.38 20A11.6 11.6 0 0 0 21 14l-9-4-9 4c0 2.9.94 5.34 2.81 7.76"/><path d="M19 13V7a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v6"/><path d="M12 10v4"/><path d="M12 2v3"/></symbol>
+  <symbol id="i-train" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="13" rx="2"/><path d="M5 10h14"/><path d="M12 3v7"/><path d="m8 19-2 3"/><path d="m16 19 2 3"/><path d="M8.5 13.5h.01"/><path d="M15.5 13.5h.01"/></symbol>
+  <symbol id="i-truck" viewBox="0 0 24 24"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.62l-3.5-4.37A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></symbol>
+  <symbol id="i-storm" viewBox="0 0 24 24"><path d="M6 16.326A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 .5 8.973"/><path d="m13 12-3 5h4l-3 5"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-doc" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+  <symbol id="i-ledger" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+  <symbol id="i-box" viewBox="0 0 24 24"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1Z"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+  <symbol id="i-waves" viewBox="0 0 24 24"><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></symbol>
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M12.8 19.6A2 2 0 1 0 14 16H2"/><path d="M17.5 8a2.5 2.5 0 1 1 2 4H2"/><path d="M9.8 4.4A2 2 0 1 1 11 8H2"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+  <symbol id="i-calc" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><path d="M8 12h.01"/><path d="M12 12h.01"/><path d="M16 12h.01"/><path d="M8 16h.01"/><path d="M12 16h.01"/><path d="M16 16h.01"/><path d="M8 20h.01"/><path d="M12 20h.01"/><path d="M16 20h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+</svg>
+
+<a class="skip-link" href="#overview">К содержимому</a>
+<div id="offline-banner" class="offline-banner" role="status" hidden>Офлайн: API недоступен — показана закэшированная оболочка, данные могут быть неактуальны. Карта без тайлов.</div>
+
+<header class="appbar">
+  <div class="appbar-inner">
+    <a class="brand" href="#overview" aria-label="Smart Caspian Transit — к сводке">
+      <span class="brand-mark" aria-hidden="true"><svg class="ic"><use href="#i-anchor"/></svg></span>
+      <span class="brand-text">Smart Caspian Transit<span class="brand-tag">МТК «Север–Юг» · демо</span></span>
+    </a>
+    <nav class="appnav" aria-label="Разделы пульта">
+      <a href="#overview">Сводка</a>
+      <a href="#corridor">Коридор</a>
+      <a href="#search-card">Поиск</a>
+      <a href="#exceptions-card">Риски</a>
+      <a href="#twin">Груз</a>
+      <a href="#clearance-card">Документы</a>
+      <a href="#sources">Источники</a>
     </nav>
+    <div class="appbar-status">
+      <span class="live-chip" id="live-badge" role="status"><svg class="ic" aria-hidden="true"><use href="#i-waves"/></svg>Погода: загружается…</span>
+      <a class="demo-chip" href="#sources" title="Демо-данные: загруженность портов и очереди на таможне иллюстративные; погода живая; ML — эксперимент">ДЕМО</a>
+    </div>
   </div>
 </header>
 
-<main class="wrap">
-  <section class="kpis" id="kpis">
-    <div class="kpi"><span class="kpi-num" id="kpi-ship">—</span><span class="kpi-label">грузов в пути</span></div>
-    <div class="kpi"><span class="kpi-num" id="kpi-delay">—</span><span class="kpi-label">средняя задержка по грузам</span></div>
-    <div class="kpi"><span class="kpi-num" id="kpi-port">—</span><span class="kpi-label">самое загруженное звено</span></div>
-    <div class="kpi"><span class="kpi-num" id="kpi-co2">—</span><span class="kpi-label">CO₂ самого чистого маршрута</span></div>
-  </section>
+<div id="storm-strip" class="storm-strip" role="alert" hidden>
+  <svg class="ic" aria-hidden="true"><use href="#i-storm"/></svg>
+  <span><b>Штормовое предупреждение.</b> Паромы не выходят, пропуск рейса +48 ч — все прогнозы, маршруты и грузы пересчитаны сценарием.</span>
+</div>
 
-  <section class="card">
-    <h2>Коридор в цифрах — реальные данные</h2>
-    <div class="stats" id="corridor-stats"></div>
-    <p class="hint">Источники: РЖД / Правительство РФ (окт 2026), Росморречфлот, АСОП. Подробнее — в README.</p>
-  </section>
-
-  <section class="card">
-    <h2>Карта коридора и сравнение маршрутов</h2>
-    <div class="storm-row">
-      <button id="storm-btn" class="storm-btn">🌩 Шторм на Каспии: выкл</button>
-      <span class="hint" id="storm-note">Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.</span>
-      <span class="hint" id="live-badge">Погода: загружается…</span>
+<main id="main">
+  <!-- 01 · Сводка -->
+  <section class="section" id="overview" aria-labelledby="h-overview">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">01</span>
+      <h2 id="h-overview">Оперативная сводка</h2>
+      <p class="section-desc">Москва → Бендер-Аббас через Каспий. Загруженность портов и таможня — демо-снимок, погода — живая.</p>
     </div>
-    <div id="map"></div>
-    <p class="hint">Карта — схема: прямые сегменты между узлами, не фактический путь судна/поезда. Выбранный маршрут поиска подсвечен красным пунктиром (клик по карточке маршрута меняет выбор).</p>
-    <table class="routes" id="compare-table">
-      <thead><tr><th>Маршрут</th><th>Время в пути</th><th>Срок с запасом (90%)*</th><th>Задержка</th><th>Риск срыва срока*</th><th>CO₂, т</th><th>Стоимость**</th><th>Шторм добавляет, ч***</th><th>Лучшее</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <p class="hint">* <b>Срок с запасом</b> — время, в которое груз успевает в 9 случаях из 10 (прогнали 200 вариантов погоды). <b>Риск срыва</b> — оценка, не точная вероятность. Время в пути = движение + ожидание парома (у каспийских паромов нет расписания, ждём в среднем до 3 дней) + задержки. ** Стоимость — оценка по ставкам за тонно-км. CO₂ — оценка по международным коэффициентам. *** <b>«Шторм добавляет»</b> — сколько часов в среднем добавляет шторм к доставке этим маршрутом (сравнили 2000 сценариев спокойной погоды и шторма). Сухопутный маршрут от моря не зависит → 0.</p>
-    <h3>Срок доставки: обычная погода vs шторм</h3>
-    <div class="sim-controls"><label>Маршрут:
-      <select id="eta-route"><option value="R1">R1 — Западный</option><option value="R2">R2 — Восточный</option><option value="R3">R3 — Сухопутный</option></select>
-    </label></div>
-    <div id="eta-dist" class="chart"></div>
-  </section>
-
-  <section class="card" id="search-card">
-    <h2>🔍 Динамический поиск маршрута</h2>
-    <p class="hint">Система сама ищет лучшие маршруты по всей сети коридора — не три готовых варианта. Учитывает погоду, закрытые порты и таможню. Ниже — компромиссы между скоростью, ценой и экологией.</p>
-    <div class="sim-controls">
-      <label>Откуда: <select id="search-from"></select></label>
-      <label>Куда: <select id="search-to"></select></label>
-      <label>Цель:
-        <select id="search-objective">
-          <option value="time">быстрее</option>
-          <option value="cost">дешевле</option>
-          <option value="co2">чище</option>
-        </select>
-      </label>
-      <button id="search-btn" class="primary">Найти маршруты</button>
+    <div class="panel">
+      <div class="kpi-strip" id="kpis">
+        <div class="kpi"><span class="kpi-label">Грузов в пути</span><span class="kpi-num" id="kpi-ship">—</span></div>
+        <div class="kpi"><span class="kpi-label">Средняя задержка</span><span class="kpi-num" id="kpi-delay">—</span></div>
+        <div class="kpi"><span class="kpi-label">Самое загруженное звено</span><span class="kpi-num kpi-num-sm" id="kpi-port">—</span></div>
+        <div class="kpi"><span class="kpi-label">CO₂ чистого маршрута</span><span class="kpi-num kpi-num-sm" id="kpi-co2">—</span></div>
+      </div>
+      <div class="corridor-row">
+        <div class="corridor-title"><svg class="ic" aria-hidden="true"><use href="#i-layers"/></svg>Коридор в цифрах — реальные данные</div>
+        <div class="stats" id="corridor-stats"></div>
+        <p class="hint">Источники: РЖД / Правительство РФ (окт 2026), Росморречфлот, АСОП. Подробно — <a href="#sources">в provenance</a>.</p>
+      </div>
     </div>
-    <div id="search-results"></div>
-    <h3>Компромисс: скорость × цена × экология</h3>
-    <div id="pareto-chart" class="chart"></div>
   </section>
 
-  <section class="card" id="exceptions-card">
-    <h2>⚠ Исключения — что сломалось и что делать</h2>
-    <ul class="exceptions" id="exceptions-list"><li class="hint">Загружается…</li></ul>
-  </section>
-
-  <section class="card">
-    <h2>🧮 Рассчитать свой груз</h2>
-    <div class="sim-controls">
-      <label>Маршрут:
-        <select id="quote-route">
-          <option value="R1">R1 — Западный (Махачкала–Амирабад)</option>
-          <option value="R2">R2 — Восточный (Астрахань–Актау)</option>
-          <option value="R3">R3 — Сухопутный (Баку–Астара)</option>
-        </select>
-      </label>
-      <label>Вес, тонн: <input type="number" id="quote-weight" min="1" max="5000" value="48"></label>
-      <button id="quote-btn" class="primary">Рассчитать</button>
+  <!-- 02 · Коридор -->
+  <section class="section" id="corridor" aria-labelledby="h-corridor">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">02</span>
+      <h2 id="h-corridor">Карта коридора и сравнение маршрутов</h2>
+      <p class="section-desc">Три базовых маршрута против живой погоды. Шторм пересчитывает весь пульт.</p>
     </div>
-    <div class="sim-controls">
-      <label>Сценарий: закрыть узел
-        <select id="scenario-close">
-          <option value="">— нет —</option>
-          <option value="makhachkala">Махачкала (порт закрыт)</option>
-          <option value="astrakhan">Астрахань (порт закрыт)</option>
-          <option value="aktau">Актау (порт закрыт)</option>
-          <option value="baku">Баку (узел закрыт)</option>
-        </select>
-      </label>
-      <label>Доп. таможня, ч: <input type="number" id="scenario-customs" min="0" max="168" value="0"></label>
-      <label>Волна, м (0–15): <input type="number" id="scenario-wave" min="0" max="15" step="0.1" placeholder="авто"></label>
-      <label>Ветер, м/с (0–60): <input type="number" id="scenario-wind" min="0" max="60" step="1" placeholder="авто"></label>
-      <button id="scenario-btn" class="primary">Применить сценарий</button>
-      <button id="scenario-reset" class="storm-btn">Сбросить</button>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-head-text">
+          <h3>Схема коридора</h3>
+          <p class="hint" id="storm-note" aria-live="polite">Обычная погода: волна 0,9–1,2 м, ветер 9–11 м/с.</p>
+        </div>
+        <button id="storm-btn" class="btn btn-storm" type="button" aria-pressed="false">
+          <svg class="ic" aria-hidden="true"><use href="#i-storm"/></svg>Шторм на Каспии<span class="storm-state">выкл</span>
+        </button>
+      </div>
+      <div class="map-grid">
+        <div id="map" role="application" aria-label="Карта коридора Север–Юг"></div>
+        <aside class="map-aside" aria-label="Легенда маршрутов">
+          <div class="aside-title">Маршруты · клик — фокус на карте</div>
+          <div id="route-legend"><p class="hint loading">Загружается…</p></div>
+          <p class="hint">Карта — схема: прямые сегменты между узлами, не фактический путь судна/поезда. Маршрут поиска подсвечен пунктиром. Зум — кнопками на карте.</p>
+        </aside>
+      </div>
+      <div class="table-scroll">
+        <table class="routes" id="compare-table">
+          <caption class="sr-only">Сравнение маршрутов: время, срок с запасом, задержка, риск, CO₂, стоимость</caption>
+          <thead><tr><th scope="col">Маршрут</th><th scope="col" class="num">Время в пути</th><th scope="col" class="num">Срок с запасом (90%)*</th><th scope="col" class="num">Задержка</th><th scope="col">Риск срыва срока*</th><th scope="col" class="num">CO₂, т</th><th scope="col" class="num">Стоимость**</th><th scope="col" class="num">Шторм добавляет, ч***</th><th scope="col">Лучшее</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="hint">* <b>Срок с запасом</b> — время, в которое груз успевает в 9 случаях из 10 (200 вариантов погоды). <b>Риск срыва</b> — оценка, не точная вероятность. Время в пути = движение + ожидание парома (расписания нет, в среднем до 3 дней) + задержки. ** Стоимость — оценка по ставкам за тонно-км; CO₂ — оценка по международным коэффициентам. *** «Шторм добавляет» — средние часы, добавляемые штормом (2000 сценариев); сухопутный маршрут от моря не зависит → 0.</p>
+      <div class="panel-sub">
+        <div class="sub-head">
+          <h3><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg>Срок доставки: обычная погода vs шторм</h3>
+          <label class="inline-field">Маршрут
+            <select id="eta-route"><option value="R1">R1 — Западный</option><option value="R2">R2 — Восточный</option><option value="R3">R3 — Сухопутный</option></select>
+          </label>
+        </div>
+        <div id="eta-dist" class="chart"><p class="hint loading">Загружается…</p></div>
+      </div>
+      <div class="panel-sub">
+        <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-anchor"/></svg>Порты: загруженность и таможня</h3></div>
+        <div class="ports-grid" id="ports-grid"></div>
+        <p class="hint">Загруженность и очереди — демо-снимок; погода на море — живая (Open-Meteo). Паромы Каспия ходят без расписания: ожидание 1–2 дня — норма, до недели при заторах.</p>
+      </div>
     </div>
-    <p class="hint">Сценарий применяется единообразно: сравнение, поиск, калькулятор, грузы, исключения и Monte Carlo. Явная волна/ветер переопределяет шторм и живую погоду; пустые поля — погода по источнику (live/демо).</p>
-    <p class="verdict" id="quote-result">Выберите маршрут и вес — покажем время, задержку, ML-прогноз, CO₂ и стоимость.</p>
   </section>
 
-  <section class="card">
-    <h2>Порты: загруженность и таможня</h2>
-    <div class="ports-grid" id="ports-grid"></div>
-    <p class="hint">Загруженность и очереди — демо-снимок; погода на море — живая (Open-Meteo). Паромы Каспия ходят без фиксированного расписания: ожидание 1–2 дня — норма, до недели при заторах.</p>
-  </section>
-
-  <section class="grid">
-    <div class="card" id="twin">
-      <h2>Цифровой двойник груза</h2>
-      <select id="shipment-select"></select>
-      <div id="shipment-info"></div>
-      <h3>Создать груз</h3>
-      <div class="sim-controls">
-        <label>Название: <input type="text" id="new-name" value="Электроника" style="width:100%"></label>
-        <label>Груз: <input type="text" id="new-cargo" value="1 × 40ft" style="width:100%"></label>
-        <label>Вес, т: <input type="number" id="new-weight" min="1" max="5000" value="48"></label>
-        <label>Маршрут:
-          <select id="new-route">
-            <option value="R1">R1 — Западный</option>
-            <option value="R2">R2 — Восточный</option>
-            <option value="R3">R3 — Сухопутный</option>
+  <!-- 03 · Поиск -->
+  <section class="section" id="search-card" aria-labelledby="h-search">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">03</span>
+      <h2 id="h-search">Динамический поиск маршрута</h2>
+      <p class="section-desc">Поиск по всей сети коридора, не три готовых варианта: погода, закрытые порты, таможня.</p>
+    </div>
+    <div class="panel">
+      <div class="form-row">
+        <label class="field">Откуда<select id="search-from"></select></label>
+        <label class="field">Куда<select id="search-to"></select></label>
+        <label class="field">Цель
+          <select id="search-objective">
+            <option value="time">быстрее</option>
+            <option value="cost">дешевле</option>
+            <option value="co2">чище</option>
           </select>
         </label>
-        <button id="create-btn" class="primary">Создать и отслеживать</button>
+        <button id="search-btn" class="btn btn-primary" type="button"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>Найти маршруты</button>
       </div>
-      <p class="hint" id="create-result"></p>
-      <ol class="timeline" id="timeline"></ol>
-      <h3>События перевозки</h3>
-      <p class="hint">📍 Фактические события (демо-симуляция или введённые вручную) + модельный таймлайн план/прогноз. Это не live GPS/AIS-трекинг.</p>
-      <div class="sim-controls">
-        <label>Тип:
-          <select id="event-type">
-            <option value="departure">Отправление</option>
-            <option value="arrival">Прибытие</option>
-            <option value="customs_done">Таможня завершена</option>
-            <option value="delay">Задержка</option>
-            <option value="note">Заметка</option>
-          </select>
-        </label>
-        <label>Источник: <input type="text" id="event-source" value="manual (demo)" style="width:100%"></label>
-        <label>Заметка: <input type="text" id="event-note" placeholder="напр. вагон подан под погрузку" style="width:100%"></label>
-        <button id="event-btn" class="primary">Добавить факт</button>
+      <div id="search-results" aria-live="polite"></div>
+      <div class="panel-sub">
+        <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-route"/></svg>Компромисс: скорость × цена × экология</h3></div>
+        <div id="pareto-chart" class="chart"><p class="hint loading">Загружается…</p></div>
       </div>
-      <p class="hint" id="event-result"></p>
-      <ol class="timeline" id="events-timeline"></ol>
-      <p class="verdict" id="verdict">…</p>
-      <div class="ml-box" id="ml-box">ML-прогноз загружается…</div>
-    </div>
-    <div class="card" id="clearance-card">
-      <h2>Цифровой коридор: pre-clearance</h2>
-      <p class="hint">Документы подаются до прибытия. Статус назначает <b>сервер</b> (симуляция таможенного органа, правила demo-rules-v1) — клиент не может сам присвоить «проверен». Решение пишется в append-only реестр с hash-связкой и происхождением (issuer, версия правил, хеш снимка документов). Это tamper-evident демо-механика, не production-блокчейн.</p>
-      <ul class="docs" id="docs-list"></ul>
-      <button id="clearance-btn" class="primary">Отправить на pre-clearance</button>
-      <p id="clearance-result"></p>
-      <h3>Реестр решений</h3>
-      <ul class="ledger" id="ledger"></ul>
     </div>
   </section>
 
-  <section class="card" id="sources">
-    <h2>Откуда данные: provenance</h2>
-    <p class="hint">Каждый факт маркирован: live / исторические / демо / синтетика / допущение. Погода: Open-Meteo (CC BY 4.0, non-commercial free tier). Подробно — docs/RESEARCH.md и docs/DATA_SOURCES.md.</p>
-    <ul class="sources" id="sources-list"><li class="hint">Загружается…</li></ul>
+  <!-- 04 · Исключения -->
+  <section class="section" id="exceptions-card" aria-labelledby="h-exc">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">04</span>
+      <h2 id="h-exc">Исключения — что сломалось и что делать</h2>
+    </div>
+    <div class="panel">
+      <ul class="exceptions" id="exceptions-list" aria-live="polite"><li class="hint loading">Загружается…</li></ul>
+    </div>
+  </section>
+
+  <!-- 05 · Расчёт и сценарии -->
+  <section class="section" id="quote" aria-labelledby="h-quote">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">05</span>
+      <h2 id="h-quote">Расчёт груза и сценарии</h2>
+      <p class="section-desc">Сценарий применяется единообразно: сравнение, поиск, калькулятор, грузы, исключения и Monte Carlo.</p>
+    </div>
+    <div class="panel">
+      <fieldset class="form-block">
+        <legend><svg class="ic" aria-hidden="true"><use href="#i-calc"/></svg>Свой груз</legend>
+        <div class="form-row">
+          <label class="field field-wide">Маршрут
+            <select id="quote-route">
+              <option value="R1">R1 — Западный (Махачкала–Амирабад)</option>
+              <option value="R2">R2 — Восточный (Астрахань–Актау)</option>
+              <option value="R3">R3 — Сухопутный (Баку–Астара)</option>
+            </select>
+          </label>
+          <label class="field">Вес, тонн<input type="number" id="quote-weight" min="1" max="5000" value="48" inputmode="numeric"></label>
+          <button id="quote-btn" class="btn btn-primary" type="button">Рассчитать</button>
+        </div>
+      </fieldset>
+      <fieldset class="form-block">
+        <legend><svg class="ic" aria-hidden="true"><use href="#i-zap"/></svg>Сценарий форс-мажора</legend>
+        <div class="form-row">
+          <label class="field field-wide">Закрыть узел
+            <select id="scenario-close">
+              <option value="">— нет —</option>
+              <option value="makhachkala">Махачкала (порт закрыт)</option>
+              <option value="astrakhan">Астрахань (порт закрыт)</option>
+              <option value="aktau">Актау (порт закрыт)</option>
+              <option value="baku">Баку (узел закрыт)</option>
+            </select>
+          </label>
+          <label class="field">Доп. таможня, ч<input type="number" id="scenario-customs" min="0" max="168" value="0" inputmode="numeric"></label>
+          <label class="field">Волна, м (0–15)<input type="number" id="scenario-wave" min="0" max="15" step="0.1" placeholder="авто" inputmode="decimal"></label>
+          <label class="field">Ветер, м/с (0–60)<input type="number" id="scenario-wind" min="0" max="60" step="1" placeholder="авто" inputmode="numeric"></label>
+          <button id="scenario-btn" class="btn btn-primary" type="button">Применить сценарий</button>
+          <button id="scenario-reset" class="btn btn-ghost" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>Сбросить</button>
+        </div>
+        <p class="hint">Явная волна/ветер переопределяет шторм и живую погоду; пустые поля — погода по источнику (live/демо).</p>
+      </fieldset>
+      <p class="verdict" id="quote-result" aria-live="polite">Выберите маршрут и вес — покажем время, задержку, ML-прогноз, CO₂ и стоимость.</p>
+    </div>
+  </section>
+
+  <!-- 06 · Двойник + pre-clearance -->
+  <section class="section" id="cargo" aria-labelledby="h-cargo">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">06</span>
+      <h2 id="h-cargo">Цифровой двойник и таможенный коридор</h2>
+      <p class="section-desc">Таймлайн план/прогноз + фактические события; документы подаются до прибытия груза.</p>
+    </div>
+    <div class="grid-2">
+      <div class="panel" id="twin">
+        <div class="panel-head"><div class="panel-head-text"><h3><svg class="ic" aria-hidden="true"><use href="#i-box"/></svg>Цифровой двойник груза</h3></div></div>
+        <label class="field">Груз<select id="shipment-select"></select></label>
+        <div id="shipment-info" class="info-bar" aria-live="polite"></div>
+        <div class="panel-sub">
+          <div class="sub-head"><h3>Создать груз</h3></div>
+          <div class="form-row">
+            <label class="field">Название<input type="text" id="new-name" value="Электроника"></label>
+            <label class="field">Груз<input type="text" id="new-cargo" value="1 × 40ft"></label>
+            <label class="field">Вес, т<input type="number" id="new-weight" min="1" max="5000" value="48" inputmode="numeric"></label>
+            <label class="field">Маршрут
+              <select id="new-route">
+                <option value="R1">R1 — Западный</option>
+                <option value="R2">R2 — Восточный</option>
+                <option value="R3">R3 — Сухопутный</option>
+              </select>
+            </label>
+            <button id="create-btn" class="btn btn-primary" type="button">Создать и отслеживать</button>
+          </div>
+          <p class="hint result-line" id="create-result" aria-live="polite"></p>
+        </div>
+        <div class="panel-sub">
+          <div class="sub-head"><h3>Прогноз по плечам</h3></div>
+          <ol class="timeline" id="timeline"></ol>
+          <p class="verdict" id="verdict" aria-live="polite">…</p>
+        </div>
+        <div class="panel-sub">
+          <div class="sub-head"><h3>События перевозки</h3></div>
+          <p class="hint">Фактические события (демо-симуляция или введённые вручную) + модельный таймлайн план/прогноз. Это не live GPS/AIS-трекинг.</p>
+          <div class="form-row">
+            <label class="field">Тип
+              <select id="event-type">
+                <option value="departure">Отправление</option>
+                <option value="arrival">Прибытие</option>
+                <option value="customs_done">Таможня завершена</option>
+                <option value="delay">Задержка</option>
+                <option value="note">Заметка</option>
+              </select>
+            </label>
+            <label class="field">Источник<input type="text" id="event-source" value="manual (demo)"></label>
+            <label class="field field-wide">Заметка<input type="text" id="event-note" placeholder="напр. вагон подан под погрузку"></label>
+            <button id="event-btn" class="btn btn-primary" type="button">Добавить факт</button>
+          </div>
+          <p class="hint result-line" id="event-result" aria-live="polite"></p>
+          <ol class="timeline" id="events-timeline"></ol>
+        </div>
+        <div class="ml-box" id="ml-box" aria-live="polite">ML-прогноз загружается…</div>
+      </div>
+      <div class="panel" id="clearance-card">
+        <div class="panel-head"><div class="panel-head-text"><h3><svg class="ic" aria-hidden="true"><use href="#i-doc"/></svg>Цифровой коридор: pre-clearance</h3></div></div>
+        <p class="hint">Статус назначает <b>сервер</b> (симуляция таможенного органа, правила demo-rules-v1) — клиент не может сам присвоить «проверен». Решение пишется в append-only реестр с hash-связкой и происхождением (issuer, версия правил, хеш снимка документов). Tamper-evident демо-механика, не production-блокчейн.</p>
+        <ul class="docs" id="docs-list"></ul>
+        <button id="clearance-btn" class="btn btn-primary btn-block" type="button"><svg class="ic" aria-hidden="true"><use href="#i-shield"/></svg>Отправить на pre-clearance</button>
+        <p class="hint result-line" id="clearance-result" aria-live="polite"></p>
+        <div class="panel-sub">
+          <div class="sub-head"><h3><svg class="ic" aria-hidden="true"><use href="#i-ledger"/></svg>Реестр решений</h3></div>
+          <ul class="ledger" id="ledger"></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 · Источники -->
+  <section class="section" id="sources" aria-labelledby="h-sources">
+    <div class="section-head">
+      <span class="section-index" aria-hidden="true">07</span>
+      <h2 id="h-sources">Откуда данные: provenance</h2>
+      <p class="section-desc">Каждый факт маркирован: live / исторические / демо / синтетика / допущение.</p>
+    </div>
+    <div class="panel">
+      <ul class="sources" id="sources-list"><li class="hint loading">Загружается…</li></ul>
+      <p class="hint">Погода: Open-Meteo (CC BY 4.0, non-commercial free tier). Подробно — docs/RESEARCH.md и docs/DATA_SOURCES.md.</p>
+    </div>
   </section>
 </main>
 
-<footer class="wrap foot">Smart Caspian Transit · команда Zaza international · хакатон IV Международного Каспийского цифрового форума · Каспийск, 13 ноября 2026 · Кейс 2, трек 3 «Цифровая экосистема МТК “Север–Юг”»</footer>
+<footer class="foot">
+  <div class="foot-inner">
+    <span class="foot-brand"><svg class="ic" aria-hidden="true"><use href="#i-anchor"/></svg>Smart Caspian Transit</span>
+    <span>Команда Zaza international · IV Международный Каспийский цифровой форум · Каспийск, 13 ноября 2026 · Кейс 2, трек 3 «Цифровая экосистема МТК „Север–Юг“»</span>
+  </div>
+</footer>
 
+<noscript><p class="hint" style="padding:16px">Для работы пульта нужен JavaScript.</p></noscript>
 <script src="/static/vendor/leaflet.js"></script>
 <script src="/static/app.js"></script>
 <script>
