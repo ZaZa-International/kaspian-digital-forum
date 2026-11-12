@@ -149,3 +149,8 @@ def test_ledger_tamper_detected():
         conn.execute("UPDATE ledger SET seq=? WHERE seq=?", (e[0]["seq"], e[1]["seq"]))
         conn.execute("UPDATE ledger SET seq=? WHERE seq=-1", (e[1]["seq"],))
     assert store.verify_ledger() is False
+
+def test_health_exposes_store_status():
+    body = client.get("/api/health").json()
+    assert body["status"] == "ok"
+    assert body["store"]["ok"] is True and body["store"]["path"].endswith("sct.db")

@@ -72,7 +72,9 @@ def guard_write(request: Request, x_write_token: str | None = Header(None)) -> N
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "smart-caspian-transit", "data": "demo-seed"}
+    st = store.status()
+    return {"status": "ok" if st["ok"] else "degraded",
+            "service": "smart-caspian-transit", "data": "demo-seed", "store": st}
 
 
 @app.get("/api/nodes")

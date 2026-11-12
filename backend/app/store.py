@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(os.environ.get("SCT_DATA_DIR", str(Path(__file__).parent / "data")))
 DB_PATH = DATA_DIR / "sct.db"
 
 _SCHEMA = """
@@ -416,6 +417,16 @@ def list_events(shipment_id: str) -> list[dict]:
 def clear_events() -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM events")
+
+
+def status() -> dict:
+    """Lightweight store health check ( surfaced in /api/health )."""
+    try:
+        with _conn() as conn:
+            conn.execute("SELECT 1")
+        return {"ok": True, "path": str(DB_PATH)}
+    except Exception as e:  # noqa: BLE001 - diagnostic surface
+        return {"ok": False, "path": str(DB_PATH), "error": f"{type(e).__name__}: {e}"}
 
 
 def reset_demo() -> dict:
