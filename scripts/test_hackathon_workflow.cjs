@@ -82,9 +82,9 @@ async function main() {
     assert.equal((await (await requested).json()).decision.profile, value);
     await waitText(lab, "Предпросмотр · принятый план не изменён");
   }
-  await page.locator("[data-shipment-link=SHP-1044]").click();
+  await page.goto(base + "/app/shipments/SHP-1044?tab=resilience");
   await waitText(lab, "Оставшийся путь без парома");
-  await page.locator("[data-shipment-link=SHP-1042]").click();
+  await page.goto(base + "/app/shipments/SHP-1042?tab=resilience");
   await lab.locator(".lab-cliff").waitFor();
   const newShipment = await post(page, "/api/shipments", {
     headers: { ...headers, "Idempotency-Key": "hackathon-transit-fixture" },
@@ -99,10 +99,9 @@ async function main() {
     });
     assert.ok(event.ok(), await event.text());
   }
-  await page.locator("#refresh").click();
-  await page.locator(`[data-shipment-link="${id}"]`).click();
+  await page.goto(base + `/app/shipments/${encodeURIComponent(id)}?tab=resilience`);
   await waitText(lab, "Груз уже на морском плече");
-  await page.locator("[data-shipment-link=SHP-1042]").click();
+  await page.goto(base + "/app/shipments/SHP-1042?tab=resilience");
   await lab.locator(".lab-cliff").waitFor();
   console.log("PASS all route profiles, land-only and already-sailed states");
 

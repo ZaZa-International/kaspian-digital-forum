@@ -51,3 +51,32 @@
   .flat-map-wrapper .flat-port-label { font-size: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .map-mode-switch button { transition: none; } }
+
+/* Operations maps use a light surface and explicit, high-contrast navigation. */
+.map-controller[data-purpose="ops"] { background: #f3f6fc; color: #15233b; }
+.map-controller[data-purpose="ops"] .map-modebar { background: #fff; border-color: #dbe3f0; }
+.map-controller[data-purpose="ops"] .map-modebar > span { color: #34445f; font-weight: 600; }
+.map-controller[data-purpose="ops"] .map-mode-switch button { color: #34445f; background: #f4f7fc; border-color: #c6d2e3; }
+.map-controller[data-purpose="ops"] .map-mode-switch button[aria-pressed="true"] { background: #2455c6; color: white; border-color: #2455c6; }
+.flat-map-wrapper, .flat-map-canvas { background: #eef2ef !important; }
+.flat-map-tools button { color: #2455c6; border-color: #b8c7dd; background: #fff; }
+.flat-map-legend span::before, .flat-map-legend [data-mode="sea"]::before, .flat-map-legend [data-mode="road"]::before { border-color: #2455c6; }
+.flat-port-marker.on-route .flat-port-dot { background: #2455c6; box-shadow: 0 0 0 1px #2455c6; }
+.flat-cargo-dot { background: #2455c6; }
+.map-controller[data-purpose="ops"] .caspian-canvas canvas { touch-action: none; cursor: grab; }
+.map-controller[data-purpose="ops"] .caspian-canvas.is-dragging canvas { cursor: grabbing; }
+
+.caspian-interaction-hint { position: absolute; z-index: 4; bottom: 42px; left: 14px; max-width: calc(100% - 175px); padding: 6px 8px; border-radius: 4px; background: #102330eb; color: #e9f0fa; font-size: 11px; line-height: 1.35; pointer-events: none; }
+ .caspian-hint-touch { display: none; }
+@media (max-width: 600px) {
+  .caspian-interaction-hint { bottom: 84px; max-width: calc(100% - 28px); font-size: 10px; padding: 3px 6px; }
+  .caspian-hint-desktop { display: none; }
+  .caspian-hint-touch { display: inline; }
+}
+
+@media (max-width: 640px) { .flat-country, .flat-sea-name { opacity: .28; } }
+
+.map-controller[data-purpose="ops"] .caspian-canvas.is-compact .caspian-controls { top: 8px; right: 8px; bottom: auto; }
+.map-controller[data-purpose="ops"] .caspian-canvas.is-compact .caspian-state,
+.map-controller[data-purpose="ops"] .caspian-canvas.is-compact .caspian-north,
+.map-controller[data-purpose="ops"] .caspian-canvas.is-compact .caspian-interaction-hint { display: none; }

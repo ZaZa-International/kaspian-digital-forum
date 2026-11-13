@@ -38,7 +38,7 @@ def _page(directory: Path, detail: bool = False) -> HTMLResponse:
     for marker, content in {
         "<!-- DISPATCHER -->": dispatcher,
         "<!-- DIALOGS -->": dialogs,
-        "<!-- DETAIL_SCRIPT -->": '<script type="module" src="/static/command.js"></script>' if detail else "",
+        "<!-- DETAIL_SCRIPT -->": '<link rel="stylesheet" href="/static/passport.css" /><script type="module" src="/static/command.js"></script>' if detail else "",
     }.items():
         if shell.count(marker) != 1:
             raise HTTPException(503, "Не удалось загрузить рабочее пространство")

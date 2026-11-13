@@ -98,10 +98,14 @@ async function main() {
     "freight video reverses",
   );
   pass("freight video scrubs forward and backward without autoplay");
-  await page.goto(base + "/app/shipments/SHP-1042", { waitUntil: "networkidle" });
-  await until(() => page.locator("[data-shipment-link]").count().then((n) => n === 3), "three seed shipments");
+  await page.goto(base + "/app/shipments", { waitUntil: "networkidle" });
+  await until(() => page.locator(".workspace-shipments > li").count().then((n) => n === 3), "three seed shipments in registry");
+  await page.locator('.workspace-shipments a[href="/app/shipments/SHP-1042"]').first().click();
+  await page.locator("#workspace-heading").filter({ hasText: "Электроника" }).waitFor();
+  assert.match(await page.locator("#workspace-description").innerText(), /SHP-1042/);
   await page.locator("#review-plan").waitFor();
-  await page.locator("#ops-map canvas").waitFor();
+  await page.getByRole("button", { name: "2D карта", exact: true }).click();
+  await page.locator("#ops-map [data-renderer=leaflet]").waitFor();
   pass("shipment page loads the dispatcher and interactive map without the hero");
   await page
     .locator("#operations")
@@ -118,13 +122,12 @@ async function main() {
   ).json();
   assert.ok(storm.baseline.remaining_h > calm.baseline.remaining_h);
   assert.ok(storm.proposals.some((p) => p.legs.every((l) => l.mode !== "sea")));
-  assert.ok(
-    (await page.locator(".delta-grid").innerText()).includes("экономия"),
-  );
+  assert.match(await page.locator(".delta-grid").innerText(), /к времени в пути/);
   pass("storm proposes a ground route from current node", {
     calm_h: calm.baseline.remaining_h,
     storm_h: storm.baseline.remaining_h,
   });
+  await page.locator("details.passport-simulation > summary").click();
   await page.locator("#horizon").fill("48");
   await page.locator("#horizon").dispatchEvent("input");
   assert.equal(await page.locator("#horizon-value").textContent(), "+48 часов");
@@ -145,7 +148,7 @@ async function main() {
   assert.equal(accepted.decisions.length, 1);
   await page.reload({ waitUntil: "networkidle" });
   await page.locator("#review-plan").waitFor();
-  assert.ok((await page.locator(".cargo-id").textContent()).includes("V2"));
+  assert.match(await page.locator("#workspace-description").innerText(), /План v2/);
   pass("acceptance persists after reload and retains completed leg");
   await page.locator("[data-tab=economics]").click();
   await page.locator("[name=idle_cost_per_day]").fill("880");
@@ -219,6 +222,7 @@ async function main() {
       );
     }
   }
+  await page.goto(base + "/app/shipments", { waitUntil: "networkidle" });
   await page.locator("[data-open=create-dialog]").click();
   await page.locator("#create-form [name=name]").fill("UI проверка перевозки");
   await page.locator("#create-form [name=cargo]").fill("Оборудование");
@@ -234,13 +238,13 @@ async function main() {
   await until(
     () =>
       page
-        .locator("#detail-title")
+        .locator("#workspace-heading")
         .textContent()
         .then((s) => s.includes("UI проверка")),
     "new cargo selected",
   );
-  const title = await page.locator("#detail-title").textContent(),
-    id = title.split(" · ")[0];
+  const id = decodeURIComponent(new URL(page.url()).pathname.split("/").pop());
+  assert.match(await page.locator("#workspace-description").innerText(), new RegExp(id));
   assert.equal((await get(id)).shipment.current_node, "moscow");
   pass("create shipment through UI", id);
   await page.locator("[data-tab=events]").click();
@@ -260,9 +264,12 @@ async function main() {
     "arrival",
   );
   pass("actual events advance position and enable rerouting");
-  await page.locator("#cargo-search").fill("несуществующий груз");
-  assert.equal(await page.locator("[data-shipment-link]").count(), 0);
-  await page.locator("#cargo-search").fill("");
+  await page.goto(base + "/app/shipments", { waitUntil: "networkidle" });
+  await page.locator("#registry-search").fill("несуществующий груз");
+  await page.locator("#registry-result .workspace-empty").waitFor();
+  assert.equal(await page.locator("#registry-result .workspace-shipments > li").count(), 0);
+  await page.locator("#registry-search").fill("");
+  await page.goto(base + "/app/shipments/SHP-1042", { waitUntil: "networkidle" });
   pass("search empty state");
   await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
   await page.locator("#start-demo").click();
@@ -297,7 +304,8 @@ async function main() {
   pass("responsive widths 375,390,768,1024,1440: no horizontal overflow");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload({ waitUntil: "networkidle" });
-  await page.locator("#ops-map canvas").waitFor();
+  await page.getByRole("button", { name: "2D карта", exact: true }).click();
+  await page.locator("#ops-map [data-renderer=leaflet]").waitFor();
   assert.equal(
     await page.evaluate(
       () => getComputedStyle(document.documentElement).scrollBehavior,
@@ -319,6 +327,8 @@ async function main() {
   });
   fallback.on("pageerror", (e) => errors.push(e.message));
   await fallback.goto(base + "/app/shipments/SHP-1042", { waitUntil: "networkidle" });
+  await fallback.getByRole("button", { name: "3D карта", exact: true }).click();
+  await fallback.locator("[data-renderer=svg]").waitFor();
   assert.equal(await fallback.locator("[data-renderer=svg]").count(), 1);
   await fallback
     .locator('#ops-map [role=button][aria-label="Махачкала"]')

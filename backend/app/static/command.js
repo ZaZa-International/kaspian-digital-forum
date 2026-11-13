@@ -1,3 +1,4 @@
+import { calculateRouteProgress } from "./route-progress.js";
 import { createIntelligencePanel } from "./intelligence-panel.js";
 import { createResiliencePanel } from "./resilience-panel.js";
 import { createCorridorPanel } from "./corridor-panel.js";
@@ -78,6 +79,7 @@ const state = {
   data: null,
   detail: null,
   proposal: null,
+  proposalPriority: "balanced",
   preview: null,
   tab: "plan",
   token: "",
@@ -224,65 +226,8 @@ function activeProposal() {
     state.detail?.proposals?.[0]
   );
 }
-function knownDeparture(legId, observedAt) {
-  const events = state.detail?.events || [];
-  const replaced = new Set(
-    events.map((event) => event.correction_of).filter(Boolean),
-  );
-  const departures = events.filter(
-    (event) =>
-      event.leg_id === legId &&
-      event.event_type === "departure" &&
-      event.source !== "demo-simulation" &&
-      !replaced.has(event.id),
-  );
-  return departures.reduce((latest, event) => {
-    const time = Date.parse(
-      event.actual_ts ||
-        event.occurred_ts ||
-        (!event.planned_ts && event.received_ts),
-    );
-    return time <= observedAt && time > latest ? time : latest;
-  }, -Infinity);
-}
 function routeProgress(plan, projection, isCurrentPlan) {
-  const legs = plan.legs || [];
-  if (!legs.length) return 0;
-  const completed = new Set(plan.completed_leg_ids || []);
-  const timings = new Map((projection?.legs || []).map((leg) => [leg.id, leg]));
-  const shipment = state.detail?.shipment;
-  const observedAt = Date.parse(state.detail?.horizon?.as_of);
-  const departure = isCurrentPlan
-    ? knownDeparture(shipment?.current_leg_id, observedAt)
-    : NaN;
-  let horizon = state.horizon;
-  for (let index = 0; index < legs.length; index++) {
-    const leg = legs[index];
-    if (completed.has(leg.id)) continue;
-    const timing = timings.get(leg.id);
-    if (timing?.remaining_h == null) return index / legs.length;
-    const remaining = Math.max(0, timing.remaining_h);
-    const waiting = timing.in_transit
-      ? 0
-      : Math.min(
-          remaining,
-          (timing.wait_h || 0) + (timing.weather?.wave_m >= 2 ? 48 : 0),
-        );
-    if (horizon < remaining || (horizon === 0 && timing.in_transit)) {
-      const elapsed =
-        timing.in_transit &&
-        Number.isFinite(departure) &&
-        Number.isFinite(observedAt)
-          ? Math.max(0, (observedAt - departure) / 3600000)
-          : 0;
-      const moving = Math.max(0, horizon - waiting) + elapsed;
-      const duration = remaining - waiting + elapsed;
-      const fraction = duration > 0 ? Math.min(moving / duration, 1) : 0;
-      return (index + fraction) / legs.length;
-    }
-    horizon -= remaining;
-  }
-  return 1;
+  return calculateRouteProgress(state.detail, plan, projection, state.horizon, isCurrentPlan);
 }
 function sceneRoute(plan) {
   if (!state.map || !plan) return;
@@ -491,8 +436,19 @@ function renderDetail() {
       : s.progress_status === "in_transit"
         ? "Груз в движении"
         : `На узле: ${nodeName(s.current_node)}`;
-  $("#decision-content").innerHTML =
-    `<div><div class="cargo-id">${esc(s.id)} / ПЛАН V${esc(d.plan.version)}</div><h4>${esc(s.name)}</h4><p class="route-name">${esc(s.cargo)} · ${num(s.weight_t)} тонн</p><div class="decision-status"><i class="dot ${b.late_h > 0 ? "orange" : "mint"}"></i>${esc(position)}</div><div class="decision-eta"><span>Текущий прогноз прибытия</span><strong>${when(b.eta || s.eta)}</strong><small>${forecastNote}</small><div class="decision-shortcuts"><button type="button" class="intelligence-link" data-open-passport="intelligence">ML-прогноз <span aria-hidden="true">↗</span></button><button type="button" class="intelligence-link" data-open-passport="resilience">Стыковки <span aria-hidden="true">↗</span></button><button type="button" class="intelligence-link" data-open-passport="documents">Коридор <span aria-hidden="true">↗</span></button></div></div></div><div class="recommendation"><div class="eyebrow">${p ? "АЛЬТЕРНАТИВНЫЙ ПЛАН" : "ТЕКУЩИЙ ПЛАН"}</div><h4>${p ? esc(p.node_names?.join(" → ") || routeName(p.legs)) : "Продолжить по маршруту"}</h4><p>${p ? (p.conditional ? "Включает условные плечи. Подтвердите доступность перевозки." : "Пересчёт от доступного узла с сохранением пройденного пути.") : "Доступной альтернативы в текущем графе нет. Можно уточнить условия или добавить фактическое событие."}</p>${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>${p.delta_h == null ? "сравнение недоступно" : p.delta_h < 0 ? "экономия времени" : p.delta_h > 0 ? "дольше текущего" : "время без изменений"}</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>${p.delta_usd == null ? "сравнение недоступно" : p.delta_usd < 0 ? "расчётная экономия" : p.delta_usd > 0 ? "дополнительные расходы" : "стоимость без изменений"}</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ${svgArrow()}</button>` : ""}<p class="decision-footnote">Оценка по модели и заданным ставкам. Решение сохраняется только после вашего подтверждения.</p></div>`;
+  const alternativesTitle = !p ? "Доступных альтернатив нет" : p.delta_h < 0 ? "Можно доставить быстрее" : p.delta_usd < 0 ? "Можно снизить расходы" : "Есть другой маршрут";
+  const currentLeg = d.plan.legs?.find((leg) => leg.id === s.current_leg_id);
+  const locationText = s.progress_status === "in_transit" && currentLeg
+    ? `${nodeName(currentLeg.from)} → ${nodeName(currentLeg.to)}` : nodeName(s.current_node);
+  $("#decision-content").innerHTML = `
+    <div class="passport-position"><span class="passport-label">Где груз</span><strong>${esc(position)}</strong><p>${esc(locationText)}</p></div>
+    <div class="decision-eta"><span>Прибытие по прогнозу</span><strong>${when(b.eta || s.eta)}</strong><small class="${b.blocked || b.late_h > 0 ? "late" : ""}">${forecastNote}</small></div>
+    <div class="passport-facts"><div><span>Осталось расходов</span><strong>${money(b.total_usd)}</strong></div><div><span>Углеродный след остатка</span><strong>${num(b.co2_kg, 1)} кг CO₂</strong></div></div>
+    <div class="recommendation"><div class="eyebrow">СЛЕДУЮЩЕЕ ДЕЙСТВИЕ</div><h4>${alternativesTitle}</h4>
+      ${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>к времени в пути</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>к стоимости</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ↗</button>${p.conditional ? '<p class="passport-conditional">Доступность отдельных участков нужно подтвердить с перевозчиком.</p>' : ''}` : '<p>Добавьте фактическое событие, чтобы уточнить положение и прогноз.</p><button class="button primary" data-open-passport="events">Записать событие ↗</button>'}
+      <p class="decision-footnote">Расчётная оценка. Изменение маршрута требует подтверждения.</p>
+    </div>
+    <div class="decision-shortcuts"><button type="button" class="intelligence-link" data-open-passport="intelligence">Что влияет на прогноз ↗</button><button type="button" class="intelligence-link" data-open-passport="documents">Проверить документы ↗</button></div>`;
   renderPlan();
   renderEconomics();
   renderDocuments();
@@ -506,12 +462,21 @@ function renderDetail() {
       { opacity: 1, x: 0, duration: 0.24, overwrite: true },
     );
 }
+function orderedProposals(detail) {
+  const key = { time: "remaining_h", cost: "total_usd", green: "co2_kg" }[state.proposalPriority];
+  return [...(detail.proposals || [])].sort(key ? (a, b) => (a[key] ?? Infinity) - (b[key] ?? Infinity) : () => 0);
+}
+function proposalChooser(detail) {
+  const proposals = orderedProposals(detail);
+  const button = (p, i) => `<button type="button" class="proposal-option button ${state.proposal === p.id ? "primary" : ""}" data-proposal="${esc(p.id)}" aria-pressed="${state.proposal === p.id}"><span>${i + 1}. ${esc(p.node_names?.join(" → ") || routeName(p.legs))}<small>${num(p.remaining_h, 1)} ч · ${money(p.total_usd)} · ${num(p.co2_kg)} кг CO₂</small></span><span aria-hidden="true">↗</span></button>`;
+  return `<label class="proposal-priority">Что важнее<select id="proposal-priority">${Object.entries({ balanced: "Рекомендованные", time: "Быстрее", cost: "Дешевле", green: "Меньше CO₂" }).map(([value,label]) => `<option value="${value}"${value === state.proposalPriority ? ' selected' : ''}>${label}</option>`).join('')}</select></label>${proposals.slice(0,3).map(button).join('') || '<p>Доступных альтернатив сейчас нет.</p>'}${proposals.length > 3 ? `<details class="proposal-more"><summary>Ещё ${proposals.length - 3} вариантов</summary>${proposals.slice(3).map((p,i) => button(p,i+3)).join('')}</details>` : ''}`;
+}
 function renderPlan() {
   const d = state.detail,
     completed = d.plan.completed_leg_ids || [],
     s = d.shipment;
   $("#view-plan").innerHTML =
-    `<div class="plan-layout"><div class="plan-legs">${(d.plan.legs || []).map((l, i) => `<div class="plan-leg ${completed.includes(l.id) ? "done" : l.id === s.current_leg_id ? "current" : ""}"><span class="leg-index">${completed.includes(l.id) ? "✓" : i + 1}</span><div><strong>${esc(nodeName(l.from))} → ${esc(nodeName(l.to))}</strong><p>${esc(modes[l.mode] || l.mode)} · ${completed.includes(l.id) ? "Пройдено" : l.id === s.current_leg_id ? "Текущее плечо" : "В плане"}${l.conditional ? " · условное плечо" : ""}</p></div><span class="leg-hours">${num(l.predicted_h ?? l.base_h, 1)} ч</span></div>`).join("")}<p class="form-note">План / факты / прогноз. Завершённые плечи сохраняются при смене маршрута.</p></div><div class="plan-caption"><h4>Варианты от текущего положения</h4>${(d.proposals || []).map((p, i) => `<button class="proposal-option button ${state.proposal === p.id ? "primary" : ""}" data-proposal="${esc(p.id)}" style="width:100%;justify-content:space-between;margin-bottom:9px;text-align:left"><span>${i + 1}. ${esc(p.node_names?.slice(0, 3).join(" → ") || routeName(p.legs))}<small style="display:block;font-size:10px;margin-top:3px">${num(p.remaining_h, 1)} ч · ${money(p.total_usd)}</small></span><span>↗</span></button>`).join("") || "<p>Доступных альтернатив сейчас нет.</p>"}<h4 style="margin-top:25px">История решений</h4><ul class="version-list">${
+    `<div class="plan-layout"><div class="plan-legs">${(d.plan.legs || []).map((l, i) => `<div class="plan-leg ${completed.includes(l.id) ? "done" : l.id === s.current_leg_id ? "current" : ""}"><span class="leg-index">${completed.includes(l.id) ? "✓" : i + 1}</span><div><button type="button" class="leg-place" data-focus-node="${esc(l.to)}">${esc(nodeName(l.from))} → ${esc(nodeName(l.to))}<span aria-hidden="true"> ↗</span></button><p>${esc(modes[l.mode] || l.mode)} · ${completed.includes(l.id) ? "Пройдено" : l.id === s.current_leg_id ? "Текущее плечо" : "В плане"}${l.conditional ? " · условное плечо" : ""}</p></div><span class="leg-hours">${num(l.predicted_h ?? l.base_h, 1)} ч</span></div>`).join("")}<p class="form-note">План / факты / прогноз. Завершённые плечи сохраняются при смене маршрута.</p></div><div class="plan-caption"><h4>Варианты от текущего положения</h4>${proposalChooser(d)}<details class="passport-history"><summary>История решений</summary><ul class="version-list">${
       (d.decisions || [])
         .slice()
         .reverse()
@@ -520,7 +485,7 @@ function renderPlan() {
             `<li>Принят план v${esc(x.version ?? x.plan_version ?? "—")}<small>${when(x.created_at || x.accepted_at || x.ts)} · ${esc(x.source || "Решение оператора")}</small></li>`,
         )
         .join("") || "<li>Исходный план. Новых решений пока нет.</li>"
-    }</ul></div></div>`;
+    }</ul></details></div></div>`;
 }
 function renderEconomics() {
   const e = state.detail.economics || {},
@@ -573,6 +538,10 @@ function renderEvents() {
 function setTab(tab, { historyMode = "push" } = {}) {
   if (!tabIds.includes(tab)) tab = "plan";
   state.tab = tab;
+  if (passport) {
+    $(".desk").hidden = tab !== "plan";
+    if (tab === "plan") requestAnimationFrame(() => { state.map?.resize(); state.map?.resetView(); });
+  }
   $$("[data-tab]").forEach((b) => {
     const active = b.dataset.tab === tab;
     b.setAttribute("aria-selected", String(active));
@@ -934,7 +903,8 @@ function showPort(id, mapNode) {
   const node = state.nodes[id] || mapNode;
   const label = `${node?.name || id} · ${node?.country || "Узел коридора"}`;
   const info = $("#port-info");
-  info.textContent = label;
+  const leg = state.detail?.plan?.legs?.find((item) => item.from === id || item.to === id);
+  info.innerHTML = `<div><strong>${esc(label)}</strong><span>${leg ? "Узел принятого маршрута" : "Вне выбранного маршрута"}</span></div><button type="button" class="text-button" data-dismiss-port aria-label="Закрыть сведения о порте">×</button>`;
   info.hidden = false;
 }
 function previewRoute(proposal) {
@@ -964,6 +934,18 @@ document.addEventListener("click", async (e) => {
     renderList();
   }
   if (b.dataset.tab) setTab(b.dataset.tab);
+  if (b.dataset.focusNode) {
+    state.map?.focusPort(b.dataset.focusNode);
+    showPort(b.dataset.focusNode);
+    $("#ops-map").scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto", block: "center" });
+  }
+  if (b.hasAttribute("data-dismiss-port")) $("#port-info").hidden = true;
+  if (b.hasAttribute("data-fit-route")) {
+    if (state.detail?.plan) sceneRoute(state.detail.plan);
+    state.preview = null;
+    state.map?.fitRoute?.();
+    $("#port-info").hidden = true;
+  }
   if (b.dataset.openPassport) {
     const tab = b.dataset.openPassport;
     setTab(tab);
@@ -977,6 +959,15 @@ document.addEventListener("click", async (e) => {
     previewRoute(activeProposal());
   }
   if (b.id === "review-plan") showPlanReview();
+});
+document.addEventListener("change", (event) => {
+  if (event.target.id !== "proposal-priority" || !detailIsCurrent()) return;
+  state.proposalPriority = event.target.value;
+  state.proposal = orderedProposals(state.detail)[0]?.id;
+  renderDetail();
+  const proposal = activeProposal();
+  if (proposal) previewRoute(proposal);
+  $("#proposal-priority").focus({ preventScroll: true });
 });
 document.addEventListener("submit", (e) => {
   if (e.target.matches("form:not(#intelligence-scenario):not(#resilience-form)")) {
@@ -1053,6 +1044,22 @@ window.addEventListener(
   { once: true },
 );
 async function init() {
+  if (passport) {
+    document.body.classList.add("passport-v2");
+    $("#workspace-refresh").hidden = false;
+    $("#workspace-refresh").addEventListener("click", () => refresh());
+    // Put navigation before its content: documents and forecasts open directly.
+    $(".detail-top").after($(".desk"));
+    $(".map-toolbar > .mono").outerHTML = '<button type="button" class="text-button" data-fit-route>Весь маршрут ↗</button>';
+    const horizon = $(".horizon");
+    const scenario = document.createElement("details");
+    scenario.className = "passport-simulation";
+    const summary = document.createElement("summary");
+    summary.textContent = "Посмотреть движение на 72 часа вперёд";
+    horizon.before(scenario);
+    scenario.append(summary, horizon);
+    $(".decision-panel .panel-title h3").textContent = "Состояние груза";
+  }
   const deepTab = queryParams.get("tab");
   setTab(deepTab || "plan", { historyMode: "" });
   window.addEventListener("popstate", () =>

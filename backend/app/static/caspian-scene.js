@@ -310,7 +310,7 @@ function clippedLeg(a, b) {
   ];
 }
 
-function corridorPoints(a, b, mode) {
+function corridorPoints(a, b, mode, full = false) {
   let via = [];
   // Schematic inland waypoints keep the rail corridors on the correct shore.
   // They express direction, not verified railway track geometry.
@@ -325,7 +325,7 @@ function corridorPoints(a, b, mode) {
   const nodes = [a, ...via, b],
     points = [];
   for (let i = 1; i < nodes.length; i++) {
-    const segment = clippedLeg(nodes[i - 1], nodes[i]);
+    const segment = full ? [project(nodes[i - 1]), project(nodes[i])] : clippedLeg(nodes[i - 1], nodes[i]);
     if (segment) points.push(...(points.length ? segment.slice(1) : segment));
   }
   return points;
@@ -387,6 +387,18 @@ export async function createCaspianScene(
   source.className = "caspian-source";
   source.textContent = "Natural Earth · Схема коридора, не навигационная карта";
   wrap.append(source);
+  if (mode === "ops") {
+    const hint = document.createElement("div");
+    hint.className = "caspian-interaction-hint";
+    const desktopHint = document.createElement("span");
+    desktopHint.className = "caspian-hint-desktop";
+    desktopHint.textContent = "Перетаскивание — поворот · Shift + перетаскивание — перемещение · колесо — масштаб";
+    const touchHint = document.createElement("span");
+    touchHint.className = "caspian-hint-touch";
+    touchHint.textContent = "Один палец — поворот · два — перемещение и масштаб";
+    hint.append(desktopHint, touchHint);
+    wrap.append(hint);
+  }
   const controls = document.createElement("div");
   controls.className = "caspian-controls";
   wrap.append(controls);
@@ -429,15 +441,16 @@ export async function createCaspianScene(
       state.storyControlled = true;
       engine?.story?.();
     },
-    focusPort(id) {
+    focusPort(id, { pan = true } = {}) {
       wrap
         .querySelectorAll(".caspian-port")
         .forEach((b) => b.classList.toggle("selected", b.dataset.port === id));
-      engine?.focus(id);
+      if (pan) engine?.focus(id);
     },
     resetView() {
       engine?.reset();
     },
+    fitRoute() { engine?.fitRoute?.(); },
     resize() {
       engine?.resize();
     },
@@ -453,7 +466,8 @@ export async function createCaspianScene(
   for (const [title, text, fn] of [
     ["Увеличить карту", "+", () => engine?.zoom(0.86)],
     ["Уменьшить карту", "−", () => engine?.zoom(1.16)],
-    ["Исходный ракурс", "↺", () => api.resetView()],
+    [mode === "ops" ? "Показать Каспий" : "Исходный ракурс", "↺", () => api.resetView()],
+    ...(mode === "ops" ? [["Показать весь маршрут", "⌗", () => api.fitRoute()]] : []),
   ]) {
     const b = document.createElement("button");
     b.type = "button";
@@ -530,6 +544,7 @@ export async function createCaspianScene(
   } else listen(window, "resize", api.resize);
   engine.resize();
   engine.route();
+  if (mode === "ops") engine.reset();
   return api;
 
   function choosePort(id) {
@@ -718,10 +733,10 @@ export async function createCaspianScene(
     canvas.setAttribute("role", "img");
     canvas.setAttribute(
       "aria-label",
-      "Интерактивная 3D-карта Каспия. Перетаскивайте для вращения. Стрелки вращают карту, плюс и минус меняют масштаб, Home сбрасывает ракурс.",
+      "Интерактивная 3D-карта Каспия. Перетаскивайте для вращения, с Shift или правой кнопкой для перемещения. Двумя пальцами перемещайте и меняйте масштаб. Стрелки вращают, Shift и стрелки перемещают, плюс и минус меняют масштаб, Home показывает маршрут.",
     );
     wrap.prepend(canvas);
-    const camera = new T.PerspectiveCamera(35, 1, 0.1, 150);
+    const camera = new T.PerspectiveCamera(35, 1, 0.1, mode === "ops" ? 400 : 150);
     const orbit = {
         theta: -0.22,
         phi: 0.64,
@@ -923,7 +938,7 @@ export async function createCaspianScene(
     wrap.append(labelLayer);
     const anchors = [],
       portMeshes = [];
-    for (const p of PORTS) {
+    for (const p of (mode === "ops" ? [...PORTS, NODES.moscow, NODES.bandar_abbas] : PORTS)) {
       const [x, z] = project(p);
       const pos = new T.Vector3(x, 0.46, z);
       const group = new T.Group();
@@ -1028,7 +1043,7 @@ export async function createCaspianScene(
     const ghostGroup = new T.Group();
     plate.add(ghostGroup);
     function curveFor(a, b, mode) {
-      const clipped = corridorPoints(a, b, mode);
+      const clipped = corridorPoints(a, b, mode, wrap.dataset.mode === "ops");
       if (clipped.length < 2) return null;
       const p = clipped[0],
         q = clipped.at(-1);
@@ -1220,7 +1235,7 @@ export async function createCaspianScene(
         underlay.renderOrder = 1;
         routeGroup.add(underlay);
         const material = new T.MeshBasicMaterial({
-          color: state.storm && mode === "sea" ? 0xff784f : r.color,
+          color: state.storm && mode === "sea" ? 0xff784f : (wrap.dataset.mode === "ops" ? 0x477dff : r.color),
           depthWrite: false,
         });
         const line = new T.Mesh(
@@ -1229,7 +1244,7 @@ export async function createCaspianScene(
         );
         line.renderOrder = 2;
         routeGroup.add(line);
-        routeMaterials.push({ material, mode, color: r.color });
+        routeMaterials.push({ material, mode, color: wrap.dataset.mode === "ops" ? 0x477dff : r.color });
         const ship = cargoShip(r.color, mode);
         ship.scale.setScalar(mode === "sea" ? 1.7 : 1.35);
         routeGroup.add(ship);
@@ -1321,6 +1336,7 @@ export async function createCaspianScene(
     function resize() {
       width = wrap.clientWidth || 600;
       height = wrap.clientHeight || 500;
+      if (mode === "ops") wrap.classList.toggle("is-compact", height < 350);
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -1356,7 +1372,7 @@ export async function createCaspianScene(
           x < 5 ||
           x > width - 5 ||
           y < 48 ||
-          y > height - (width < 520 ? 130 : 86);
+          y > height - (width < 520 ? (height < 350 ? 22 : height < 400 ? 72 : 130) : 86);
         const box = [px, py, px + ew, py + eh];
         const collides =
           !a.country &&
@@ -1468,21 +1484,53 @@ export async function createCaspianScene(
         frame = requestAnimationFrame(render);
       }
     }
+    const pointers = new Map();
     let pointer = null;
+    const pan = (dx, dy) => {
+      const scale = desired.radius / Math.max(200, height) * 1.15;
+      desired.target.x += (-dx * Math.cos(desired.theta) + dy * Math.sin(desired.theta)) * scale;
+      desired.target.z += (dx * Math.sin(desired.theta) + dy * Math.cos(desired.theta)) * scale;
+      orbit.user = true;
+      wake();
+    };
+    const pinchDistance = () => {
+      const [a, b] = [...pointers.values()];
+      return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+    };
+    let lastPinch = 0;
+    listen(canvas, "contextmenu", (e) => { if (mode === "ops") e.preventDefault(); });
     listen(canvas, "pointerdown", (e) => {
-      if (e.pointerType === "touch" && !e.isPrimary) return;
+      if (mode === "hero" && e.pointerType === "touch" && !e.isPrimary) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) lastPinch = pinchDistance();
       pointer = {
         x: e.clientX,
         y: e.clientY,
         theta: desired.theta,
         phi: desired.phi,
         moved: false,
+        pan: mode === "ops" && (e.button === 2 || e.shiftKey),
+        lastX: e.clientX, lastY: e.clientY,
       };
       canvas.setPointerCapture(e.pointerId);
       wrap.classList.add("is-dragging");
     });
     listen(canvas, "pointermove", (e) => {
-      if (!pointer) return;
+      if (!pointer || !pointers.has(e.pointerId)) return;
+      const previous = pointers.get(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (mode === "ops" && pointers.size >= 2) {
+        const distance = pinchDistance();
+        if (lastPinch && distance) zoom(lastPinch / distance);
+        pan((e.clientX - previous.x) / 2, (e.clientY - previous.y) / 2);
+        lastPinch = distance;
+        return;
+      }
+      if (pointer.pan) {
+        pan(e.clientX - pointer.lastX, e.clientY - pointer.lastY);
+        pointer.lastX = e.clientX; pointer.lastY = e.clientY;
+        return;
+      }
       const dx = e.clientX - pointer.x,
         dy = e.clientY - pointer.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) {
@@ -1493,8 +1541,11 @@ export async function createCaspianScene(
       desired.phi = clamp(pointer.phi - dy * 0.004, 0.27, 1.12);
       wake();
     });
-    const endPointer = () => {
-      pointer = null;
+    const endPointer = (e) => {
+      pointers.delete(e.pointerId);
+      lastPinch = 0;
+      const remaining = [...pointers.values()][0];
+      pointer = remaining ? { x: remaining.x, y: remaining.y, lastX: remaining.x, lastY: remaining.y, theta: desired.theta, phi: desired.phi, pan: false } : null;
       wrap.classList.remove("is-dragging");
     };
     listen(canvas, "pointerup", endPointer);
@@ -1513,7 +1564,10 @@ export async function createCaspianScene(
     listen(canvas, "keydown", (e) => {
       const step = 0.08;
       let handled = true;
-      if (e.key === "ArrowLeft") desired.theta -= step;
+      if (mode === "ops" && e.shiftKey && e.key.startsWith("Arrow")) {
+        pan(e.key === "ArrowLeft" ? 35 : e.key === "ArrowRight" ? -35 : 0, e.key === "ArrowUp" ? 35 : e.key === "ArrowDown" ? -35 : 0);
+      }
+      else if (e.key === "ArrowLeft") desired.theta -= step;
       else if (e.key === "ArrowRight") desired.theta += step;
       else if (e.key === "ArrowUp")
         desired.phi = clamp(desired.phi - step, 0.27, 1.12);
@@ -1531,10 +1585,30 @@ export async function createCaspianScene(
     });
     function zoom(f) {
       orbit.user = true;
-      desired.radius = clamp(desired.radius * f, 10, 42);
+      desired.radius = clamp(desired.radius * f, 10, mode === "ops" ? 180 : 42);
+      wake();
+    }
+    function fitPoints(points) {
+      if (!points.length) return;
+      const xs = points.map(p => p[0]), zs = points.map(p => p[1]);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      desired.theta = 0;
+      desired.phi = 0.32;
+      desired.target.set((minX + maxX) / 2, 0, (minZ + maxZ) / 2);
+      const aspect = Math.max(.25, width / height);
+      // Reserve room for labels and controls on all four sides.
+      const vertical = ((maxZ - minZ) * Math.cos(desired.phi) + 3) / .75;
+      const horizontal = (maxX - minX + 3) / (.80 * aspect);
+      desired.radius = Math.max(22, Math.max(vertical, horizontal) / (2 * Math.tan(35 * Math.PI / 360)));
+      orbit.user = true;
       wake();
     }
     function reset() {
+      if (mode === "ops") {
+        fitPoints([[-4.4, -5.7], [4.4, 5.5]]);
+        return;
+      }
       orbit.user = false;
       desired.theta = -0.22;
       desired.phi = 0.64;
@@ -1542,12 +1616,18 @@ export async function createCaspianScene(
       desired.target.set(0, 0, 0.1);
       wake();
     }
+    function fitRoute() {
+      const lookup = { ...NODES, ...state.route.lookup };
+      const points = state.route.legs.flatMap(([a, b]) => [lookup[a], lookup[b]])
+        .filter((p) => p && Number.isFinite(+p.lat) && Number.isFinite(+p.lon)).map(project);
+      fitPoints(points);
+    }
     function focus(id) {
-      const p = NODES[id];
+      const p = state.route.lookup?.[id] || NODES[id];
       if (!p) return;
       const [x, z] = project(p);
       orbit.user = true;
-      desired.target.set(x * 0.38, 0, z * 0.38);
+      desired.target.set(mode === "ops" ? x : x * 0.38, 0, mode === "ops" ? z : z * 0.38);
       desired.radius = width / height < 0.85 ? 25 : 20;
       wake();
     }
@@ -1585,6 +1665,7 @@ export async function createCaspianScene(
       focus,
       zoom,
       reset,
+      fitRoute,
       story,
       progress: wake,
       scenario,

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#07131b" />
+  <meta name="theme-color" content="#f6f7fa" />
   <title>Рабочая платформа · Caspian</title>
   <link rel="icon" href="/static/assets/brand/mark.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/static/vendor/fonts.css" />
@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/intelligence-panel.css" />
   <link rel="stylesheet" href="/static/operations-labs.css" />
   <link rel="stylesheet" href="/static/workspace.css" />
+  <script defer src="/static/vendor/gsap/gsap.min.js"></script>
   <script type="module" src="/static/workspace.js"></script>
   <!-- DETAIL_SCRIPT -->
 </head>
@@ -18,8 +19,9 @@
   <a class="skip" href="#workspace-main">К содержимому</a>
   <aside class="workspace-sidebar" aria-label="Разделы платформы">
     <a class="brand workspace-brand" href="/app"><img src="/static/assets/brand/mark.svg" alt="" width="36" height="36" /><span>caspian<span class="brand-dot">/</span><small>SMART TRANSIT</small></span></a>
-    <nav class="workspace-nav" aria-label="Платформа">
-      <a href="/app" data-workspace-nav="overview"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>Обзор</a>
+    <button type="button" class="workspace-menu-toggle" aria-expanded="false" aria-controls="platform-navigation">Разделы <span aria-hidden="true">☰</span></button>
+    <nav class="workspace-nav" id="platform-navigation" aria-label="Платформа">
+      <a href="/app" data-workspace-nav="overview"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>Рабочий стол</a>
       <a href="/app/shipments" data-workspace-nav="shipments"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18v14H3zM3 10h18M8 6V4m8 2V4M8 15h8"/></svg>Перевозки</a>
       <a href="/app/map" data-workspace-nav="map"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></svg>Карта</a>
       <a href="/app/risks" data-workspace-nav="risks"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 9v5m0 3v1"/></svg>Риски и задачи</a>

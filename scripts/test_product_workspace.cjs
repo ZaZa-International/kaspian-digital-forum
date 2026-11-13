@@ -8,7 +8,7 @@ const { chromium } = require('playwright');
 const root = path.resolve(__dirname, '..');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'caspian-product-'));
 const base = `http://127.0.0.1:${process.env.PRODUCT_UI_TEST_PORT || 8778}`;
-const output = path.join(root, 'artifacts/qa/product');
+const output = path.join(root, 'artifacts/qa/platform-v2');
 const token = 'isolated-product-test';
 const checks = [], errors = [];
 let server, browser;
@@ -47,11 +47,42 @@ async function main() {
   };
 
   await go('/app');
-  await page.getByRole('heading', { name: 'Обзор перевозок', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Карта перевозок', exact: true }).waitFor();
+  await page.locator('#workspace-map .map-mode-switch').waitFor();
+  await page.locator('.route-steps button').first().waitFor();
+  const fleet = await get();
+  assert.equal(await page.locator('.fleet-card').count(), fleet.shipments.length);
+  assert.equal(await page.locator('.workbench-summary strong').first().textContent(), String(fleet.shipments.length));
   assert.equal(await page.locator('#freight-video').count(), 0);
-  assert.equal(await page.locator('.workspace-metrics strong').first().textContent(), String((await get()).summary.active_count));
-  await page.screenshot({ path: path.join(output, 'overview-desktop.png'), fullPage: true });
-  pass('overview reads portfolio totals from the API without a landing sequence');
+  await page.locator('#fleet-search').fill('несуществующая перевозка');
+  await page.getByText('Грузы не найдены.', { exact: true }).waitFor();
+  await page.locator('#fleet-search').fill('');
+  assert.equal(await page.locator('.fleet-card').count(), fleet.shipments.length);
+  pass('map workbench reads real fleet and search empty state resets');
+
+  // A delayed older response must not replace the latest selected cargo.
+  let releaseRoute;
+  const routeGate = new Promise(resolve => { releaseRoute = resolve; });
+  const holdRoute = async route => {
+    if (route.request().url().includes('/SHP-1043')) await routeGate;
+    try { await route.continue(); } catch { /* Selection aborts the obsolete request. */ }
+  };
+  await page.route('**/api/operations/SHP-1043', holdRoute);
+  const firstRoute = page.waitForRequest(request => request.url().includes('/api/operations/SHP-1043'));
+  await page.locator('[data-select-cargo="SHP-1043"]').click();
+  await firstRoute;
+  await page.locator('[data-select-cargo="SHP-1044"]').click();
+  await until(async () => (await page.locator('#workspace-map-status').textContent()).includes('SHP-1044'), 'latest cargo route');
+  releaseRoute();
+  await page.unroute('**/api/operations/SHP-1043', holdRoute);
+  assert.equal(new URL(page.url()).searchParams.get('shipment'), 'SHP-1044');
+  assert.equal(await page.locator('[data-select-cargo="SHP-1044"]').getAttribute('aria-pressed'), 'true');
+  assert.ok((await page.locator('#workspace-map-passport').getAttribute('href')).endsWith('SHP-1044'));
+  assert.ok((await page.locator('#cargo-inspector').textContent()).includes('SHP-1044'));
+  await page.reload();
+  await page.locator('[data-select-cargo="SHP-1044"][aria-pressed="true"]').waitFor();
+  await until(async () => (await page.locator('#workspace-map-status').textContent()).includes('SHP-1044'), 'selected route after reload');
+  pass('latest cargo survives delayed response and reload with matching URL, card, route and passport');
 
   await page.getByRole('navigation', { name: 'Платформа' }).getByRole('link', { name: 'Перевозки', exact: true }).click();
   await page.locator('#registry-search').waitFor();
@@ -63,7 +94,36 @@ async function main() {
   await page.locator('#registry-sort').selectOption('eta');
   await page.screenshot({ path: path.join(output, 'shipments-desktop.png'), fullPage: true });
   await page.getByRole('link', { name: 'Открыть SHP-1042', exact: true }).click();
-  await page.locator('#detail-title').filter({ hasText: 'SHP-1042' }).waitFor();
+  await page.locator('#workspace-description').filter({ hasText: 'SHP-1042' }).waitFor();
+  const beforePreview = await (await page.request.get(base + '/api/operations/SHP-1042')).json();
+  assert.ok(beforePreview.proposals.length > 0, 'fixture must contain alternatives');
+  const previewPosts = [];
+  const observeWrites = request => {
+    if (request.method() === 'POST' && request.url().includes('/api/operations/SHP-1042')) previewPosts.push(request.url());
+  };
+  page.on('request', observeWrites);
+  for (const [priority, field] of [['time', 'remaining_h'], ['cost', 'total_usd'], ['green', 'co2_kg']]) {
+    await page.locator('#proposal-priority').selectOption(priority);
+    const first = page.locator('[data-proposal]').first();
+    const selectedId = await first.getAttribute('data-proposal');
+    const selected = beforePreview.proposals.find(item => item.id === selectedId);
+    assert.ok(selected, `${priority} selects an API proposal`);
+    const minimum = Math.min(...beforePreview.proposals.map(item => item[field] ?? Infinity));
+    assert.equal(selected[field] ?? Infinity, minimum, `${priority} should sort by ${field}`);
+    assert.equal(await first.getAttribute('aria-pressed'), 'true');
+    await first.click();
+    assert.equal(await page.locator('[data-proposal]').first().getAttribute('aria-pressed'), 'true');
+  }
+  assert.equal(await page.locator('.plan-caption > [data-proposal]').count(), Math.min(3, beforePreview.proposals.length));
+  if (beforePreview.proposals.length > 3) {
+    await page.locator('.proposal-more summary').click();
+    assert.equal(await page.locator('.proposal-more [data-proposal]').count(), beforePreview.proposals.length - 3);
+  }
+  const afterPreview = await (await page.request.get(base + '/api/operations/SHP-1042')).json();
+  assert.equal(afterPreview.plan.version, beforePreview.plan.version);
+  assert.deepEqual(previewPosts, []);
+  page.off('request', observeWrites);
+  pass('proposal priorities rank API alternatives and preview without changing accepted plan');
   await page.getByRole('tab', { name: 'Документы', exact: true }).click();
   assert.equal(new URL(page.url()).searchParams.get('tab'), 'documents');
   await page.reload();
@@ -171,7 +231,7 @@ async function main() {
   await page.locator('#create-form [name=name]').fill('Многостраничная перевозка');
   await page.locator('#create-form [name=cargo]').fill('Оборудование');
   await page.locator('#create-form button[type=submit]').click();
-  await page.locator('#detail-title').filter({ hasText: 'Многостраничная перевозка' }).waitFor();
+  await page.locator('#workspace-heading').filter({ hasText: 'Многостраничная перевозка' }).waitFor();
   const newId = new URL(page.url()).pathname.split('/').at(-1);
   assert.ok(newId.startsWith('SHP-'));
   await page.getByRole('tab', { name: 'События', exact: true }).click();
@@ -190,7 +250,7 @@ async function main() {
   await page.locator('#create-form [name=name]').fill('Вторая перевозка после возврата');
   await page.locator('#create-form [name=cargo]').fill('Материалы');
   await page.locator('#create-form button[type=submit]').click();
-  await page.locator('#detail-title').filter({ hasText: 'Вторая перевозка после возврата' }).waitFor();
+  await page.locator('#workspace-heading').filter({ hasText: 'Вторая перевозка после возврата' }).waitFor();
   assert.notEqual(new URL(page.url()).pathname.split('/').at(-1), newId);
   pass('Back after a successful creation starts a fresh shipment with a new request key');
 
@@ -204,17 +264,27 @@ async function main() {
   await go('/app/map?shipment=SHP-1042');
   await page.getByRole('button', { name: '2D карта', exact: true }).click();
   await page.locator('#workspace-map .leaflet-container').waitFor();
-  assert.equal(await page.getByRole('button', { name: '2D карта', exact: true }).getAttribute('aria-pressed'), 'true');
-  await page.locator('#workspace-map-shipment').selectOption('SHP-1044');
-  await until(async () => (await page.locator('#workspace-map-passport').getAttribute('href')).endsWith('SHP-1044'), 'selected route link');
-  await page.screenshot({ path: path.join(output, 'map-2d-desktop.png'), fullPage: true });
+  await until(async () => (await page.getByRole('button', { name: '2D карта', exact: true }).getAttribute('aria-pressed')) === 'true', '2D selected');
+  await page.locator('#workspace-map [data-port="makhachkala"]').click();
+  await page.locator('#workspace-map-status').filter({ hasText: 'Махачкала' }).waitFor();
+  await page.getByRole('region', { name: 'Узел Махачкала' }).waitFor();
+  assert.match(await page.locator('#map-port-card').textContent(), /Точка|На узле/);
+  await page.getByRole('button', { name: 'Закрыть сведения об узле' }).click();
+  assert.ok((await page.locator('#workspace-map-status').textContent()).includes('SHP-1042'));
+  assert.ok((await page.locator('#workspace-map-passport').getAttribute('href')).endsWith('SHP-1042'));
+  await page.locator('[data-select-cargo="SHP-1044"]').click();
+  await until(async () => (await page.locator('#workspace-map-status').textContent()).includes('SHP-1044'), 'selected route');
   await page.reload();
-  await page.locator('#workspace-map .leaflet-container').waitFor();
-  assert.equal(await page.locator('#workspace-map-shipment').inputValue(), 'SHP-1044');
+  await page.locator('[data-select-cargo="SHP-1044"][aria-pressed="true"]').waitFor();
   await page.getByRole('button', { name: '3D карта', exact: true }).click();
   await page.locator('#workspace-map canvas').waitFor();
-  await page.screenshot({ path: path.join(output, 'map-3d-desktop.png'), fullPage: true });
-  pass('2D and 3D keep selected shipment, reload state and working route links');
+  await until(async () => (await page.getByRole('button', { name: '3D карта', exact: true }).getAttribute('aria-pressed')) === 'true', '3D selected');
+  assert.ok((await page.locator('#workspace-map-passport').getAttribute('href')).endsWith('SHP-1044'));
+  await page.locator('#cargo-inspector a[href$="?tab=documents"]').click();
+  await page.locator('#upload-form').waitFor();
+  assert.equal(new URL(page.url()).searchParams.get('tab'), 'documents');
+  assert.ok(new URL(page.url()).pathname.endsWith('SHP-1044'));
+  pass('2D and 3D retain cargo, port context is visible, document action opens exact passport');
 
   await go('/app/analytics');
   await page.getByRole('heading', { name: 'Сравнение по маршрутам', exact: true }).waitFor();
@@ -231,14 +301,52 @@ async function main() {
   await page.getByRole('heading', { name: 'Сравнение по маршрутам', exact: true }).waitFor();
   pass('API failure has a visible retry that restores the page');
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  for (const route of ['/app', '/app/shipments', '/app/risks', '/app/documents', '/app/analytics', '/app/map']) {
-    await go(route);
-    if (route === '/app/map') await page.locator('#workspace-map .map-mode-switch').waitFor();
-    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, route);
-    await page.screenshot({ path: path.join(output, route.split('/').at(-1) + '-mobile.png'), fullPage: true });
+  // Capture every product route in both viewport sizes using the same isolated data.
+  const routes = [['workbench', '/app'], ['map', '/app/map'], ['shipments', '/app/shipments'],
+    ['risks', '/app/risks'], ['documents', '/app/documents'], ['analytics', '/app/analytics']];
+  for (const [label, width, height] of [['desktop', 1440, 960], ['mobile', 390, 844]]) {
+    await page.setViewportSize({ width, height });
+    for (const [name, route] of routes) {
+      await go(route);
+      if (name === 'workbench' || name === 'map') {
+        await page.locator('#workspace-map .map-mode-switch').waitFor();
+        await page.getByRole('button', { name: '2D карта', exact: true }).click();
+        await page.locator('#workspace-map .leaflet-container').waitFor();
+        await page.locator('#workspace-map .flat-coast').waitFor();
+        await page.locator('.route-steps summary').waitFor();
+        if (label === 'mobile') {
+          const box = await page.locator('#workspace-map').boundingBox();
+          assert.ok(box.y <= 130 && box.height >= 300, `mobile map placement ${JSON.stringify(box)}`);
+          const action = await page.locator('#workspace-next-action').boundingBox();
+          assert.ok(action.y + action.height <= height, `action must be on first mobile screen: ${JSON.stringify(action)}`);
+          await page.locator('#map-cargo-select').selectOption('SHP-1043');
+          await until(async () => (await page.locator('#workspace-map-status').textContent()).includes('SHP-1043'), 'mobile cargo switch');
+          assert.match(await page.locator('#workspace-map-passport').getAttribute('href'), /SHP-1043$/);
+          await page.locator('#map-cargo-select').selectOption('SHP-1042');
+          await until(async () => (await page.locator('#workspace-map-status').textContent()).includes('SHP-1042'), 'restore selected cargo');
+        }
+      }
+      if (label === 'mobile') {
+        await page.getByRole('button', { name: 'Разделы', exact: true }).click();
+        assert.ok(await page.getByRole('navigation', { name: 'Платформа' }).getByRole('link', { name: 'Документы', exact: true }).isVisible());
+        assert.ok(await page.getByRole('navigation', { name: 'Платформа' }).getByRole('link', { name: 'Аналитика', exact: true }).isVisible());
+        await page.keyboard.press('Escape');
+        assert.equal(await page.getByRole('button', { name: 'Разделы', exact: true }).getAttribute('aria-expanded'), 'false');
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `${route} ${label}`);
+      await page.screenshot({ path: path.join(output, `${name}-${label}.png`), fullPage: true });
+    }
+    for (const tab of ['plan', 'documents', 'intelligence']) {
+      await go('/app/shipments/SHP-1042?tab=' + tab);
+      await page.locator('#workspace-heading').filter({ hasText: 'Электроника' }).waitFor();
+      await page.locator('#view-' + tab).waitFor();
+      if (tab === 'plan') await page.locator('#ops-map .flat-coast').waitFor();
+      if (tab === 'documents') await page.locator('#upload-form').waitFor();
+      if (tab === 'intelligence') await page.locator('#intelligence-result .intelligence-estimate').waitFor();
+      await page.screenshot({ path: path.join(output, `passport-${tab}-${label}.png`), fullPage: true });
+    }
   }
-  pass('all six product pages fit a 390px viewport with real data');
+  pass('all product routes fit desktop and mobile; mobile map starts within 130px and is usable');
   assert.deepEqual(errors, []);
   pass('no uncaught browser errors across the product journey');
 }

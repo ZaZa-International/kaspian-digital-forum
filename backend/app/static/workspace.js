@@ -1,3 +1,4 @@
+import { calculateRouteProgress } from "./route-progress.js";
 import { escape, hours, number, time, unit } from "./operations-labs.js";
 
 const $ = (selector) => document.querySelector(selector);
@@ -6,7 +7,7 @@ const page = parts[1] || "overview";
 const detail = page === "shipments" && parts.length === 3;
 const content = $("#workspace-content");
 const titles = {
-  overview: ["Обзор перевозок", "Риски, документы и ближайшие действия по всему коридору."],
+  overview: ["Карта перевозок", "Маршруты и задачи в одном месте."],
   shipments: ["Перевозки", "Найдите груз, откройте его паспорт или добавьте новую перевозку."],
   map: ["Карта коридора", "Выберите перевозку и посмотрите её принятый маршрут."],
   risks: ["Риски и задачи", "Разберите расчётные предупреждения и назначьте действия."],
@@ -71,6 +72,8 @@ function setHead() {
   $("#workspace-description").textContent = detail ? "Маршрут, экономика, документы и события." : description;
   if (page !== "shipments" || detail)
     $(".workspace-head-actions [data-open=create-dialog]").classList.remove("primary");
+  document.body.classList.toggle("workspace-detail-page", detail);
+  document.body.classList.toggle("workspace-workbench-page", !detail && (page === "overview" || page === "map"));
   document.title = `${detail ? "Паспорт перевозки" : title} · Caspian`;
   document.querySelector(`[data-workspace-nav="${page}"]`)?.setAttribute("aria-current", "page");
   if (detail) {
@@ -175,7 +178,7 @@ function analytics() {
 function risks() {
   const tasks = workspace.tasks.filter((task) =>
     filters.tasks === "all" || (filters.tasks === "done" ? task.status === "done" : task.status !== "done"));
-  return `${panel("Предупреждения по перевозкам", "", listAlerts(workspace.alerts))}
+  return `${panel("Предупреждения по перевозкам", `<a href="#tasks">К задачам (${workspace.tasks.filter((task) => task.status !== "done").length}) ↓</a>`, listAlerts(workspace.alerts))}
     <section class="workspace-panel" id="tasks"><header><h2>Задачи</h2><button type="button" class="button primary compact" data-task-create>Новая задача</button></header>
       <div class="workspace-filters"><label>Статус<select id="tasks-filter">${opts([["active","Активные"],["done","Выполненные"],["all","Все задачи"]], filters.tasks)}</select></label></div>
       ${tasks.length ? `<ul class="workspace-records">${tasks.map((task) => `<li><div>
@@ -190,7 +193,7 @@ function risks() {
 
 function render() {
   const views = { overview, shipments: registry, documents, risks, analytics };
-  if (page === "map") { renderMap(); return; }
+  if (page === "map" || page === "overview") { renderMap(); return; }
   content.innerHTML = (views[page] || overview)();
 }
 async function refresh() {
@@ -208,6 +211,9 @@ async function refresh() {
     if (location.hash === "#tasks") $("#tasks")?.scrollIntoView();
   } catch (error) {
     if (loading !== request || error.name === "AbortError") return;
+    mapRequest?.abort();
+    map?.dispose();
+    map = null;
     content.innerHTML = `<div class="workspace-panel"><h2>Данные недоступны</h2><p role="alert">${escape(error.message)}</p>
       <button class="button compact" type="button" data-workspace-retry>Повторить</button></div>`;
   } finally {
@@ -218,32 +224,90 @@ async function refresh() {
   }
 }
 
+let selectedCargo = "";
+let cargoSearch = "";
+let selectedDetail = null;
+function selectCargo(id) {
+  if (!workspace.shipments.some((row) => row.id === id)) return;
+  selectedCargo = id;
+  const url = new URL(location.href);
+  url.searchParams.set("shipment", id);
+  history.replaceState(null, "", url);
+  $("#fleet-cards").innerHTML = cargoCards();
+  if ($("#map-cargo-select")) $("#map-cargo-select").value = id;
+  $("#map-port-card")?.remove();
+  showRoute(id);
+}
+function showMapPort(id, node) {
+  if (window.gsap && $("#map-port-card")) gsap.killTweensOf($("#map-port-card"));
+  $("#map-port-card")?.remove();
+  const nodes = selectedDetail?.plan?.nodes || [];
+  const index = nodes.indexOf(id);
+  const name = node?.name || selectedDetail?.plan?.node_names?.[index] || id;
+  const row = workspace.shipments.find((item) => item.id === selectedCargo);
+  const here = workspace.shipments.filter((item) => item.current_node === id);
+  const card = document.createElement("section");
+  card.id = "map-port-card";
+  card.className = "map-port-card";
+  card.setAttribute("aria-label", `Узел ${name}`);
+  card.innerHTML = `<div><span>УЗЕЛ КОРИДОРА</span><h3>${escape(name)}</h3></div><button type="button" class="port-close" data-close-port aria-label="Закрыть сведения об узле">×</button>
+    <p>${index >= 0 ? `Точка ${index + 1} из ${nodes.length} · ${escape(row?.name || selectedCargo)}` : "Вне маршрута выбранного груза"}</p>
+    <p>${here.length ? `На узле: ${here.map((item) => escape(item.name)).join(", ")}` : "Грузов на узле в текущем реестре нет"}</p>
+    ${index >= 0 ? `<a href="${shipmentLink(selectedCargo)}">Открыть маршрут груза ↗</a>` : ''}`;
+  $(".workbench-map").append(card);
+  if (window.gsap && !matchMedia("(prefers-reduced-motion: reduce)").matches)
+    gsap.fromTo(card, { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: .18, ease: "power2.out", overwrite: true, clearProps: "opacity,transform" });
+  $("#workspace-map-status").textContent = `${selectedCargo} · ${name} · ${index >= 0 ? "узел выбранного маршрута" : "узел коридора"}`;
+}
+function cargoCards() {
+  const rows = workspace.shipments.filter((row) => [row.id, row.name, row.cargo, row.route_name].join(" ").toLocaleLowerCase("ru").includes(cargoSearch));
+  return rows.length ? rows.map((row) => `<button type="button" class="fleet-card ${row.id === selectedCargo ? "is-selected" : ""}" data-select-cargo="${escape(row.id)}" aria-pressed="${row.id === selectedCargo}">
+    <span class="fleet-card-top"><span>${escape(row.id)}${row.demo ? " · демо" : ""}</span><span class="fleet-risk ${["critical", "elevated"].includes(row.risk) ? "is-warning" : ""}">${escape(riskNames[row.risk] || "В работе")}</span></span>
+    <strong>${escape(row.name)}</strong><span class="fleet-card-route">${escape(row.route_name || "Маршрут не указан")}</span>
+    <span class="fleet-card-meta">${escape(row.current_node_name || row.current_leg_label || statusNames[row.progress_status] || "В пути")} <span>${time(row.eta)}</span></span></button>`).join("") : `${empty("Грузы не найдены.")}<button type="button" class="button compact" data-clear-fleet>Сбросить поиск</button>`;
+}
+function inspector(row, data) {
+  if (!row) return `<div class="workbench-empty"><h2>Нет перевозок</h2><p>Добавьте груз, чтобы увидеть его маршрут.</p><button type="button" class="button primary" data-open="create-dialog">Новый груз +</button></div>`;
+  const alert = workspace.alerts.find((item) => item.shipment_id === row.id);
+  const plan = data?.plan;
+  const nodes = plan?.nodes || [];
+  const names = plan?.node_names || [];
+  const problem = alert?.title || (row.risk === "normal" || row.risk === "complete" ? "Нет предупреждений" : riskNames[row.risk] || "Проверьте перевозку");
+  const nextTab = alert?.target === "documents" ? "documents" : alert ? "plan" : "";
+  const nextLabel = nextTab === "documents" ? "Проверить документы" : nextTab === "plan" ? "Сравнить варианты" : "Открыть паспорт";
+  return `<div class="inspector-heading"><span class="inspector-kicker">ВЫБРАННЫЙ ГРУЗ · ${escape(row.id)}</span><h2>${escape(row.name)}</h2><p>${escape(row.cargo || "")} ${row.demo ? "· демо" : ""}</p></div>
+    <dl class="inspector-facts"><div><dt>Где</dt><dd>${escape(row.current_node_name || row.current_leg_label || statusNames[row.progress_status] || "Нет данных")}</dd></div>
+    <div><dt>Когда</dt><dd>${time(data?.baseline?.eta || row.eta)}<small>Расчётное прибытие</small></dd></div>
+    <div><dt>Что проверить</dt><dd>${escape(problem)}</dd></div></dl>
+    ${plan ? `<details class="route-steps"${matchMedia("(min-width: 641px)").matches ? " open" : ""}><summary>Этапы маршрута <span>план v${escape(plan.version)}</span></summary>${nodes.map((node, i) => `<button type="button" data-focus-port="${escape(node)}"><span class="route-dot"></span><span>${escape(names[i] || node)}</span><span aria-hidden="true">↗</span></button>`).join("") || '<p>Узлы маршрута не указаны.</p>'}</details>` : '<p class="workspace-caption">Загружаем маршрут…</p>'}
+    <div class="inspector-actions"><a class="button primary" id="workspace-next-action" href="${shipmentLink(row.id, nextTab)}">${nextLabel} <span aria-hidden="true">↗</span></a><div><a id="workspace-map-passport" href="${shipmentLink(row.id)}">Открыть паспорт ↗</a><a href="${shipmentLink(row.id, nextTab === "documents" ? "plan" : "documents")}">${nextTab === "documents" ? "Сравнить маршрут" : "Документы"} ↗</a></div></div>`;
+}
 async function renderMap() {
   mapRequest?.abort();
   map?.dispose();
   map = null;
-  const selected = new URLSearchParams(location.search).get("shipment");
-  const id = workspace.shipments.some((shipment) => shipment.id === selected) ? selected : workspace.shipments[0]?.id;
-  content.innerHTML = `<section class="workspace-panel workspace-map-panel"><div class="workspace-filters">
-    <label>Перевозка<select id="workspace-map-shipment">${opts(workspace.shipments.map((row) => [row.id, row.id + " · " + row.name]), id)}</select></label>
-    <a id="workspace-map-passport" class="button compact" href="${id ? shipmentLink(id) : "/app/shipments"}">Паспорт ↗</a></div>
-    <div id="workspace-map" aria-label="Интерактивная карта маршрутов"></div>
-    <p id="workspace-map-status" class="workspace-caption" role="status">Загружаем карту…</p></section>`;
+  const requested = new URLSearchParams(location.search).get("shipment");
+  selectedCargo = workspace.shipments.some((row) => row.id === requested) ? requested : workspace.shipments[0]?.id || "";
+  const row = workspace.shipments.find((item) => item.id === selectedCargo);
+  content.innerHTML = `<div class="workbench-summary"><span><strong>${number(workspace.shipments.length)}</strong> перевозок</span><a href="/app/risks"><strong>${number(workspace.summary.at_risk_count)}</strong> с риском ↗</a><span>Обновлено ${time(workspace.generated_at)}</span></div>
+  <section class="workbench" aria-label="Карта и перевозки">
+    <aside class="fleet-rail"><div class="fleet-heading"><div><h2>Перевозки</h2><p>Выберите груз на карте</p></div><div class="fleet-heading-actions"><a href="/app/shipments">Все ↗</a><button type="button" data-open="create-dialog" aria-label="Добавить груз">+</button></div></div>
+      <label class="fleet-search"><span class="sr-only">Поиск перевозки</span><input id="fleet-search" type="search" placeholder="Поиск груза или маршрута" value="${escape(cargoSearch)}"></label><div class="fleet-cards" id="fleet-cards">${cargoCards()}</div></aside>
+    <div class="workbench-map"><div class="map-title"><div><h2>Карта коридора</h2><p>Принятый маршрут перевозки</p></div><button type="button" class="map-fit" data-fit-route>Показать маршрут</button></div>
+      <label class="map-cargo-picker"><span class="sr-only">Груз на карте</span><select id="map-cargo-select">${workspace.shipments.map((item) => `<option value="${escape(item.id)}"${item.id === selectedCargo ? ' selected' : ''}>${escape(item.name)} · ${escape(item.id)}</option>`).join("")}</select></label><div id="workspace-map" aria-label="Интерактивная карта маршрута"></div><p id="workspace-map-status" class="map-status" role="status">Загружаем карту…</p></div>
+    <aside class="cargo-inspector" id="cargo-inspector" aria-live="polite">${inspector(row)}</aside></section>`;
   const target = $("#workspace-map");
   try {
     const { createMapController } = await import("./map-controller.js");
     if (!target.isConnected) return;
     const controller = await createMapController(target, {
       mode: "ops",
-      onPortSelect: (port, node) => {
-        $("#workspace-map-status").textContent = `${node?.name || port} · ${node?.country || "Узел коридора"}`;
-      },
+      onPortSelect: showMapPort,
     });
     if (!target.isConnected) { controller.dispose(); return; }
     map = controller;
-    const selectedId = $("#workspace-map-shipment").value;
-    if (selectedId) await showRoute(selectedId);
-    else $("#workspace-map-status").textContent = "В реестре пока нет перевозок.";
+    if (selectedCargo) await showRoute(selectedCargo);
+    else { map.setRoute({ id: "empty", nodes: [], legs: [] }); $("#workspace-map-status").textContent = "В реестре пока нет перевозок."; }
   } catch (error) {
     if (target.isConnected) $("#workspace-map-status").textContent = "Карта недоступна. Маршрут можно открыть в паспорте.";
   }
@@ -253,19 +317,24 @@ async function showRoute(id) {
   mapRequest?.abort();
   const request = new AbortController();
   mapRequest = request;
+  selectedDetail = null;
   const status = $("#workspace-map-status");
+  const row = workspace.shipments.find((item) => item.id === id);
   status.textContent = "Загружаем маршрут…";
-  $("#workspace-map-passport").href = shipmentLink(id);
+  map.setRoute({ id, nodes: [], legs: [] });
+  $("#cargo-inspector").innerHTML = inspector(row);
   try {
     const data = await api(`/api/operations/${encodeURIComponent(id)}`, { signal: request.signal });
     if (mapRequest !== request || !status.isConnected) return;
+    selectedDetail = data;
     map.setRoute({ id, legs: data.plan.legs || [], nodes: data.plan.nodes || [] });
-    const total = data.plan.legs?.length || 0;
-    map.setProgress(total ? (data.plan.completed_leg_ids?.length || 0) / total : 0);
-    status.textContent = `${id} · план v${data.plan.version} · географическая схема`;
+    map.setProgress(calculateRouteProgress(data));
+    $("#cargo-inspector").innerHTML = inspector(row, data);
+    status.textContent = `${id} · принятый маршрут · план v${data.plan.version}`;
   } catch (error) {
-    if (mapRequest === request && status.isConnected) {
+    if (mapRequest === request && status.isConnected && error.name !== "AbortError") {
       map.setRoute({ id, legs: [] });
+      $("#cargo-inspector").innerHTML = inspector(row).replace("Загружаем маршрут…", "Маршрут недоступен. Откройте паспорт или обновите данные.");
       status.textContent = error.message;
     }
   }
@@ -329,11 +398,29 @@ async function submitTask(form) {
 }
 
 setHead();
+$(".workspace-menu-toggle").addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  const expanded = button.getAttribute("aria-expanded") !== "true";
+  button.setAttribute("aria-expanded", String(expanded));
+  $(".workspace-sidebar").classList.toggle("menu-open", expanded);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && $(".workspace-sidebar.menu-open")) {
+    $(".workspace-sidebar").classList.remove("menu-open");
+    $(".workspace-menu-toggle").setAttribute("aria-expanded", "false");
+    $(".workspace-menu-toggle").focus();
+  }
+});
 if (!detail) {
   $("#workspace-refresh").addEventListener("click", refresh);
   document.addEventListener("click", (event) => {
     const button = event.target.closest("button");
     if (!button) return;
+    if (button.dataset.selectCargo) selectCargo(button.dataset.selectCargo);
+    if (button.dataset.focusPort) { map?.focusPort(button.dataset.focusPort); showMapPort(button.dataset.focusPort); }
+    if (button.hasAttribute("data-close-port")) $("#map-port-card")?.remove();
+    if (button.hasAttribute("data-clear-fleet")) { cargoSearch = ""; $("#fleet-search").value = ""; $("#fleet-cards").innerHTML = cargoCards(); $("#fleet-search").focus(); }
+    if (button.hasAttribute("data-fit-route")) map?.fitRoute();
     if (button.dataset.open) {
       if (button.dataset.open === "access-dialog") $("#access-form [name=token]").value = token;
       $("#" + button.dataset.open)?.showModal();
@@ -353,6 +440,10 @@ if (!detail) {
     if (button.dataset.taskEdit) openTask(button.dataset.taskEdit);
   });
   document.addEventListener("input", (event) => {
+    if (event.target.id === "fleet-search") {
+      cargoSearch = event.target.value.trim().toLocaleLowerCase("ru");
+      $("#fleet-cards").innerHTML = cargoCards();
+    }
     if (event.target.id === "registry-search") {
       filters.search = event.target.value.trim().toLocaleLowerCase("ru");
       $("#registry-result").innerHTML = shipmentRows();
@@ -360,6 +451,7 @@ if (!detail) {
   });
   document.addEventListener("change", (event) => {
     const { id, value } = event.target;
+    if (id === "map-cargo-select") selectCargo(value);
     if (id === "registry-risk" || id === "registry-sort") {
       filters[id.split("-")[1]] = value;
       $("#registry-result").innerHTML = shipmentRows();

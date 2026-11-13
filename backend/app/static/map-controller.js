@@ -78,7 +78,15 @@ export async function createMapController(container, options = {}) {
     content.setAttribute("aria-busy", "true");
     status.hidden = false;
     status.textContent = `Загружаем ${mode.toUpperCase()} карту…`;
-    for (const button of buttons.values()) button.disabled = true;
+
+    const timeout = setTimeout(() => {
+      if (disposed || generation !== version) return;
+      if (mode === "3d" && options.mode !== "hero") {
+        void setMode("2d");
+      } else {
+        status.textContent = `Загрузка ${mode.toUpperCase()} карты задерживается. Выберите другой режим.`;
+      }
+    }, 5000);
     try {
       const next = mode === "3d"
         ? await (await import("./caspian-scene.js")).createCaspianScene(host, callbacks)
@@ -93,7 +101,7 @@ export async function createMapController(container, options = {}) {
       renderer.setScenario(state.scenario);
       renderer.setProgress(state.progress);
       if (state.story !== null) renderer.setStoryProgress?.(state.story);
-      if (state.port) renderer.focusPort(state.port);
+      if (state.port) renderer.focusPort(state.port, { pan: false });
       renderer.resize();
       for (const [value, button] of buttons) button.setAttribute("aria-pressed", String(mode === value));
       try { localStorage.setItem(PREFERENCE, mode); } catch { /* Private browsing can disable storage. */ }
@@ -105,9 +113,9 @@ export async function createMapController(container, options = {}) {
       status.textContent = `Не удалось открыть ${mode.toUpperCase()} карту. Выберите режим, чтобы повторить.`;
       console.warn("Map renderer failed", error);
     } finally {
+      clearTimeout(timeout);
       if (!disposed && generation === version) {
         content.setAttribute("aria-busy", "false");
-        for (const button of buttons.values()) button.disabled = false;
       }
     }
   }
@@ -121,6 +129,7 @@ export async function createMapController(container, options = {}) {
     setStoryProgress(progress) { state.story = progress; renderer?.setStoryProgress?.(progress); },
     focusPort(id) { state.port = id; renderer?.focusPort(id); },
     resetView() { renderer?.resetView(); },
+    fitRoute() { (renderer?.fitRoute || renderer?.resetView)?.call(renderer); },
     resize() { renderer?.resize(); },
     dispose() {
       disposed = true;
@@ -131,6 +140,6 @@ export async function createMapController(container, options = {}) {
     },
   };
   const initial = options.initialMode || preference();
-  await setMode(modes.has(initial) ? initial : "3d");
+  void setMode(modes.has(initial) ? initial : (options.mode === "hero" ? "3d" : "2d"));
   return api;
 }

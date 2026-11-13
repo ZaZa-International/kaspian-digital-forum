@@ -3,7 +3,7 @@ import { CASPIAN_NODES, normalizeCaspianRoute } from "./caspian-scene.js";
 let leafletPromise;
 const LATLNG = (node) => [Number(node.lat), Number(node.lon)];
 const VALID = (node) => node && Number.isFinite(Number(node.lat)) && Number.isFinite(Number(node.lon));
-const MODE_COLOR = { rail: "#185c48", sea: "#2855b7", road: "#ad4829" };
+const MODE_COLOR = { rail: "#2455c6", sea: "#2455c6", road: "#2455c6" };
 const MODE_NAME = { rail: "Ж/д", sea: "Море", road: "Авто" };
 const SEA_BOUNDS = [[35.5, 45.6], [47.6, 55.5]];
 
@@ -78,6 +78,9 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
     keyboard: true, zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false,
     maxBounds: [[15, 20], [65, 75]], maxBoundsViscosity: 0.8,
   });
+  // Leaflet paths otherwise share one SVG pane: late geography can cover the route.
+  map.createPane("geography").style.zIndex = "350";
+  map.createPane("routes").style.zIndex = "410";
   L.control.zoom({ position: "bottomright", zoomInTitle: "Увеличить карту", zoomOutTitle: "Уменьшить карту" }).addTo(map);
   L.control.scale({ imperial: false, position: "bottomleft", maxWidth: 100 }).addTo(map);
   const geography = L.layerGroup().addTo(map);
@@ -85,14 +88,14 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
   const portLayer = L.layerGroup().addTo(map);
   const cargoLayer = L.layerGroup().addTo(map);
   const markers = new Map();
-  const state = { route: normalizeCaspianRoute("R1"), progress: 0, storm: false, disposed: false, routeSignature: null };
+  const state = { route: normalizeCaspianRoute("R1"), progress: 0, storm: false, disposed: false, routeSignature: null, port: null };
   let routePoints = [], validLegs = [], resizeObserver;
 
   // Graticule and country labels keep navigation legible without online tiles.
   for (let lon = 25; lon <= 75; lon += 5)
-    L.polyline([[15, lon], [65, lon]], { color: "#708d80", weight: 0.6, opacity: 0.22, interactive: false }).addTo(geography);
+    L.polyline([[15, lon], [65, lon]], { pane: "geography", color: "#708d80", weight: 0.6, opacity: 0.22, interactive: false }).addTo(geography);
   for (let lat = 20; lat <= 65; lat += 5)
-    L.polyline([[lat, 20], [lat, 75]], { color: "#708d80", weight: 0.6, opacity: 0.22, interactive: false }).addTo(geography);
+    L.polyline([[lat, 20], [lat, 75]], { pane: "geography", color: "#708d80", weight: 0.6, opacity: 0.22, interactive: false }).addTo(geography);
   for (const [name, position] of [["РОССИЯ", [49.3, 43]], ["КАЗАХСТАН", [47.8, 57]], ["АЗЕРБАЙДЖАН", [40.4, 46.7]], ["ТУРКМЕНИСТАН", [39.7, 56.6]], ["ИРАН", [33.8, 51.8]]]) {
     L.marker(position, { keyboard: false, interactive: false, icon: L.divIcon({ className: "flat-country", html: text(name), iconSize: [140, 20], iconAnchor: [70, 10] }) }).addTo(geography);
   }
@@ -100,6 +103,7 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
 
   const geoRequest = new AbortController();
   const geoTimeout = setTimeout(() => geoRequest.abort(), 10000);
+  async function loadGeography() {
   try {
     const [coastResponse, bordersResponse] = await Promise.all([
       fetch("/static/assets/geo/caspian.json", { signal: geoRequest.signal }),
@@ -107,14 +111,17 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
     ]);
     if (!coastResponse.ok || !bordersResponse.ok) throw new Error("География недоступна");
     const [coast, borders] = await Promise.all([coastResponse.json(), bordersResponse.json()]);
-    L.geoJSON(coast, { style: { color: "#4d7e83", fillColor: "#a2c9ca", weight: 1.5, fillOpacity: 1 }, interactive: false }).addTo(geography);
+    if (state.disposed) return;
+    L.geoJSON(coast, { pane: "geography", style: { className: "flat-coast", color: "#4d7e83", fillColor: "#a2c9ca", weight: 1.5, fillOpacity: 1 }, interactive: false }).addTo(geography);
     for (const line of borders.lines || []) {
-      L.polyline(line.points.map(([lon, lat]) => [lat, lon]), { color: "#829e8d", weight: 1, opacity: 0.65, interactive: false }).addTo(geography);
+      L.polyline(line.points.map(([lon, lat]) => [lat, lon]), { pane: "geography", color: "#829e8d", weight: 1, opacity: 0.65, interactive: false }).addTo(geography);
     }
     L.marker([41.8, 51.1], { keyboard: false, interactive: false, icon: L.divIcon({ className: "flat-sea-name", html: text("КАСПИЙСКОЕ МОРЕ"), iconSize: [150, 24], iconAnchor: [75, 12] }) }).addTo(geography);
   } catch {
     source.textContent = "Береговая линия недоступна · координатная схема";
   } finally { clearTimeout(geoTimeout); }
+  }
+  void loadGeography();
 
   function fitRoute() {
     if (state.disposed) return;
@@ -122,10 +129,11 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
     else map.fitBounds(SEA_BOUNDS, { animate: false, padding: [32, 45] });
   }
 
-  function selectedPort(id, notify = false) {
+  function selectedPort(id, notify = false, pan = true) {
+    state.port = id;
     for (const [key, marker] of markers) marker.getElement()?.classList.toggle("selected", key === id);
     const marker = markers.get(id);
-    if (marker) { marker.openTooltip(); map.panTo(marker.getLatLng(), { animate: false }); }
+    if (marker) { marker.openTooltip(); if (pan) map.panTo(marker.getLatLng(), { animate: false }); }
     if (notify) onPortSelect(id, (state.route.lookup || {})[id] || CASPIAN_NODES[id]);
   }
 
@@ -174,10 +182,13 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
     routePoints = validLegs.flatMap(([from, to]) => [LATLNG(lookup[from]), LATLNG(lookup[to])]);
     for (const [from, to, mode] of validLegs) {
       const color = mode === "sea" && state.storm ? "#b74b2b" : MODE_COLOR[mode] || MODE_COLOR.rail;
-      L.polyline([LATLNG(lookup[from]), LATLNG(lookup[to])], { color: "#f7faf4", weight: 7, opacity: 0.9, interactive: false }).addTo(routeLayer);
-      L.polyline([LATLNG(lookup[from]), LATLNG(lookup[to])], { color, weight: 3.5, opacity: 1, dashArray: mode === "sea" ? "8 6" : mode === "road" ? "2 6" : null, interactive: false }).addTo(routeLayer);
+      L.polyline([LATLNG(lookup[from]), LATLNG(lookup[to])], { pane: "routes", color: "#f7faf4", weight: 7, opacity: 0.9, interactive: false }).addTo(routeLayer);
+      L.polyline([LATLNG(lookup[from]), LATLNG(lookup[to])], { pane: "routes", className: `flat-route-${mode || "rail"}`, color, weight: 3.5, opacity: 1, dashArray: mode === "sea" ? "8 6" : mode === "road" ? "2 6" : null, interactive: false }).addTo(routeLayer);
     }
     drawPorts();
+    if (state.port) {
+      markers.get(state.port)?.getElement()?.classList.add("selected");
+    }
     drawCargo();
   }
 
@@ -186,11 +197,10 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
   const api = {
     setRoute(route) {
       state.route = normalizeCaspianRoute(route);
+      state.port = null;
       const signature = JSON.stringify(state.route.legs);
-      const changed = state.routeSignature !== signature;
       state.routeSignature = signature;
       drawRoute();
-      if (changed) fitRoute();
     },
     setProgress(progress) { state.progress = Math.max(0, Math.min(1, Number(progress) || 0)); drawCargo(); },
     setScenario({ storm = state.storm } = {}) {
@@ -201,8 +211,9 @@ export async function createFlatMap(container, { onPortSelect = () => {} } = {})
       drawRoute();
     },
     setStoryProgress() {},
-    focusPort(id) { selectedPort(id); },
-    resetView: fitRoute,
+    focusPort(id, { pan = true } = {}) { selectedPort(id, false, pan); },
+    resetView() { map.fitBounds(SEA_BOUNDS, { animate: false, padding: [32, 45] }); },
+    fitRoute,
     resize() { if (!state.disposed) map.invalidateSize({ animate: false, pan: false }); },
     dispose() { state.disposed = true; resizeObserver?.disconnect(); geoRequest.abort(); map.remove(); wrapper.remove(); },
   };

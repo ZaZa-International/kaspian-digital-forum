@@ -100,7 +100,7 @@ async function openPanel(page) {
     const requested = page.waitForRequest(heldUrl);
     await page.getByRole("button", { name: "Сравнить сценарий" }).click();
     await requested;
-    await page.locator("[data-shipment-link=SHP-1043]").click();
+    await page.goto(base + "/app/shipments/SHP-1043?tab=intelligence");
     await page.locator(".intelligence-number").waitFor();
     release();
     assert.match(await page.locator("#intelligence-context").textContent(), /SHP-1043/);
@@ -113,7 +113,9 @@ async function openPanel(page) {
       route.fulfill({ status: 503, json: { detail: "Проверка ошибки" } }),
       { times: 1 },
     );
+    await page.getByRole("tab", { name: "Маршрут", exact: true }).click();
     await page.getByRole("button", { name: "Шторм", exact: true }).click();
+    await page.getByRole("tab", { name: "ML-прогноз", exact: true }).click();
     await page.getByRole("alert").getByText("Проверка ошибки", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Повторить", exact: true }).click();
     await page.locator(".intelligence-number").waitFor();
@@ -122,7 +124,9 @@ async function openPanel(page) {
     console.log("PASS storm error, retry and fixed weather");
 
     if (!externalBase || process.env.SCT_TEST_JOURNAL === "1") {
+      await page.getByRole("tab", { name: "Маршрут", exact: true }).click();
       await page.getByRole("button", { name: "Обычная погода", exact: true }).click();
+      await page.getByRole("tab", { name: "ML-прогноз", exact: true }).click();
       await page.locator(".intelligence-number").waitFor();
       await page.getByText("Журнал проверки на рейсах", { exact: true }).click();
       await page.getByRole("button", { name: "Сохранить прогноз", exact: true }).click();
@@ -141,8 +145,7 @@ async function openPanel(page) {
       assert.ok(shipmentResponse.ok());
       const shipment = await shipmentResponse.json();
       const id = shipment.id || shipment.shipment?.id;
-      await page.locator("#refresh").click();
-      await page.locator(`[data-shipment-link="${id}"]`).click();
+      await page.goto(base + `/app/shipments/${encodeURIComponent(id)}?tab=intelligence`);
       await page.locator(".intelligence-number").waitFor();
       const journal = page.locator("#intelligence-journal");
       if ((await journal.getAttribute("open")) === null) {
