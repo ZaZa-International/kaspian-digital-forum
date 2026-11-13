@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import anchor, data, docking, graph, ml, model, operation_documents, operations, store, weather
+from app import anchor, data, docking, graph, ml, ml_journal, model, operation_documents, operations, store, weather
 
 # Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
 # labelled in the UI); with it, POST endpoints require X-Write-Token.
@@ -122,6 +122,7 @@ def guard_write(request: Request, x_write_token: str | None = Header(None)) -> N
 
 
 app.include_router(operations.create_router(guard_write))
+app.include_router(ml_journal.create_router(guard_write))
 
 
 @app.get("/api/health")
@@ -704,16 +705,19 @@ def ml_shipment(
     wave_m: float | None = WAVE_Q,
     wind_ms: float | None = WIND_Q,
 ):
-    s = model.get_shipment_any(shipment_id)
-    if s is None:
-        raise HTTPException(404, f"unknown shipment {shipment_id}")
+    from app import operations_intelligence
     try:
-        return ml.predict_delay(
-            data.get_route(s["route_id"]),
-            s["weight_t"],
-            storm,
-            _parse_scenario(close, extra_customs_h, wave_m, wind_ms),
+        result = operations_intelligence.forecast(
+            shipment_id,
+            {"storm": storm, **_parse_scenario(close, extra_customs_h, wave_m, wind_ms)},
         )
+        if result["status"] == "blocked":
+            raise HTTPException(422, "Оставшийся маршрут закрыт условиями сценария")
+        return {
+            **(result["prediction"] or {"status": result["status"], "ml_delay_h": None}),
+            "shipment_id": shipment_id, "plan_version": result["plan_version"],
+            "scope": result["scope"], "arrival": result["arrival"],
+        }
     except ValueError as e:
         raise HTTPException(422, str(e))
 

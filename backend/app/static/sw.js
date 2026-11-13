@@ -1,10 +1,12 @@
 /* Cache static presentation only. Cargo, tokens and API responses never enter this cache. */
-const CACHE = "sct-static-v8";
+const CACHE = "sct-static-v9";
 const ASSETS = [
   "/",
   "/static/laboratory.html",
   "/static/command.css",
   "/static/command.js",
+  "/static/intelligence-panel.js",
+  "/static/intelligence-panel.css",
   "/static/freight-hero.css",
   "/static/freight-hero.js",
   "/static/assets/freight/freight-poster.jpg",

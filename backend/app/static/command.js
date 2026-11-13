@@ -1,3 +1,5 @@
+import { createIntelligencePanel } from "./intelligence-panel.js";
+
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
 const esc = (v) =>
@@ -87,6 +89,7 @@ const state = {
   demo: null,
 };
 let toastTimer, viewAbort, refreshAbort;
+const intelligence = createIntelligencePanel($("#view-intelligence"), api);
 const query = (storm) =>
   new URLSearchParams({ storm: String(storm) }).toString();
 const canAnimate = () =>
@@ -382,7 +385,8 @@ function clearDetail(
   state.map?.setRoute({ id: "selected", nodes: [], legs: [] });
   updateHorizon();
   $("#detail-title").textContent = "Паспорт перевозки";
-  $$(".tab-view").forEach((view) => view.replaceChildren());
+  $$(".tab-view").filter((view) => view.id !== "view-intelligence").forEach((view) => view.replaceChildren());
+  intelligence.clear();
   setDetailPending(false);
 }
 async function loadDetail(id) {
@@ -391,6 +395,7 @@ async function loadDetail(id) {
   const previousProposal =
     detailIsCurrent() && id === state.selected ? state.proposal : null;
   state.selected = id;
+  intelligence.suspend(id);
   renderList();
   viewAbort?.abort();
   const request = new AbortController();
@@ -414,6 +419,12 @@ async function loadDetail(id) {
       detail.proposals?.find((p) => p.id === previousProposal)?.id ??
       detail.proposals?.[0]?.id;
     renderDetail();
+    intelligence.setContext({
+      id, storm,
+      status: detail.shipment.progress_status,
+      version: detail.plan.version,
+      sea: detail.baseline?.legs?.some((leg) => leg.mode === "sea"),
+    });
     return true;
   } catch (e) {
     if (e.name !== "AbortError" && seq === state.detailGeneration) {
@@ -448,7 +459,7 @@ function renderDetail() {
         ? "Груз в движении"
         : `На узле: ${nodeName(s.current_node)}`;
   $("#decision-content").innerHTML =
-    `<div><div class="cargo-id">${esc(s.id)} / ПЛАН V${esc(d.plan.version)}</div><h4>${esc(s.name)}</h4><p class="route-name">${esc(s.cargo)} · ${num(s.weight_t)} тонн</p><div class="decision-status"><i class="dot ${b.late_h > 0 ? "orange" : "mint"}"></i>${esc(position)}</div><div class="decision-eta"><span>Текущий прогноз прибытия</span><strong>${when(b.eta || s.eta)}</strong><small>${forecastNote}</small></div></div><div class="recommendation"><div class="eyebrow">${p ? "АЛЬТЕРНАТИВНЫЙ ПЛАН" : "ТЕКУЩИЙ ПЛАН"}</div><h4>${p ? esc(p.node_names?.join(" → ") || routeName(p.legs)) : "Продолжить по маршруту"}</h4><p>${p ? (p.conditional ? "Включает условные плечи. Подтвердите доступность перевозки." : "Пересчёт от доступного узла с сохранением пройденного пути.") : "Доступной альтернативы в текущем графе нет. Можно уточнить условия или добавить фактическое событие."}</p>${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>${p.delta_h == null ? "сравнение недоступно" : p.delta_h < 0 ? "экономия времени" : p.delta_h > 0 ? "дольше текущего" : "время без изменений"}</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>${p.delta_usd == null ? "сравнение недоступно" : p.delta_usd < 0 ? "расчётная экономия" : p.delta_usd > 0 ? "дополнительные расходы" : "стоимость без изменений"}</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ${svgArrow()}</button>` : ""}<p class="decision-footnote">Оценка по модели и заданным ставкам. Решение сохраняется только после вашего подтверждения.</p></div>`;
+    `<div><div class="cargo-id">${esc(s.id)} / ПЛАН V${esc(d.plan.version)}</div><h4>${esc(s.name)}</h4><p class="route-name">${esc(s.cargo)} · ${num(s.weight_t)} тонн</p><div class="decision-status"><i class="dot ${b.late_h > 0 ? "orange" : "mint"}"></i>${esc(position)}</div><div class="decision-eta"><span>Текущий прогноз прибытия</span><strong>${when(b.eta || s.eta)}</strong><small>${forecastNote}</small><button type="button" class="intelligence-link" data-open-intelligence>ML-прогноз <span aria-hidden="true">↗</span></button></div></div><div class="recommendation"><div class="eyebrow">${p ? "АЛЬТЕРНАТИВНЫЙ ПЛАН" : "ТЕКУЩИЙ ПЛАН"}</div><h4>${p ? esc(p.node_names?.join(" → ") || routeName(p.legs)) : "Продолжить по маршруту"}</h4><p>${p ? (p.conditional ? "Включает условные плечи. Подтвердите доступность перевозки." : "Пересчёт от доступного узла с сохранением пройденного пути.") : "Доступной альтернативы в текущем графе нет. Можно уточнить условия или добавить фактическое событие."}</p>${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>${p.delta_h == null ? "сравнение недоступно" : p.delta_h < 0 ? "экономия времени" : p.delta_h > 0 ? "дольше текущего" : "время без изменений"}</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>${p.delta_usd == null ? "сравнение недоступно" : p.delta_usd < 0 ? "расчётная экономия" : p.delta_usd > 0 ? "дополнительные расходы" : "стоимость без изменений"}</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ${svgArrow()}</button>` : ""}<p class="decision-footnote">Оценка по модели и заданным ставкам. Решение сохраняется только после вашего подтверждения.</p></div>`;
   renderPlan();
   renderEconomics();
   renderDocuments();
@@ -534,11 +545,13 @@ function setTab(tab) {
     b.tabIndex = active ? 0 : -1;
   });
   $$(".tab-view").forEach((v) => (v.hidden = v.id !== `view-${tab}`));
+  intelligence.setActive(tab === "intelligence");
 }
 async function setStorm(value) {
   if (state.storm === value) return detailIsCurrent();
   state.storm = value;
   state.detailGeneration++;
+  intelligence.suspend(state.selected);
   viewAbort?.abort();
   setDetailPending(true);
   state.preview = null;
@@ -685,7 +698,7 @@ async function submitForm(form) {
         leg_id: leg || null,
         occurred_ts: fd.get("occurred_ts")
           ? new Date(fd.get("occurred_ts")).toISOString()
-          : null,
+          : type === "arrival" ? new Date().toISOString() : null,
       };
       if (type === "delay") body.delay_h = Number(fd.get("delay_h"));
       await api(`/api/shipments/${encodeURIComponent(shipmentId)}/events`, {
@@ -1009,6 +1022,11 @@ document.addEventListener("click", async (e) => {
     renderList();
   }
   if (b.dataset.tab) setTab(b.dataset.tab);
+  if (b.hasAttribute("data-open-intelligence")) {
+    setTab("intelligence");
+    $("#tab-intelligence").focus({ preventScroll: true });
+    $(".workspace-detail").scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
+  }
   if (b.dataset.proposal && detailIsCurrent()) {
     state.proposal = b.dataset.proposal;
     renderDetail();
@@ -1017,7 +1035,7 @@ document.addEventListener("click", async (e) => {
   if (b.id === "review-plan") showPlanReview();
 });
 document.addEventListener("submit", (e) => {
-  if (e.target.matches("form")) {
+  if (e.target.matches("form:not(#intelligence-scenario)")) {
     e.preventDefault();
     submitForm(e.target);
   }
@@ -1082,6 +1100,7 @@ window.addEventListener(
     clearInterval(state.demo?.timer);
     viewAbort?.abort();
     refreshAbort?.abort();
+    intelligence.suspend();
   },
   { once: true },
 );

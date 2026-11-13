@@ -322,20 +322,19 @@ async function loadShipment() {
     </li>`).join("");
   $("#clearance-result").textContent = "";
   await loadLedger();
-  const mlp = await getJSON(`/api/ml/shipment/${currentShipment}?storm=${storm}`);
+  const mlp = await getJSON(`/api/ml/shipment/${currentShipment}?storm=${storm}${scenarioQuery()}`);
   const ex = mlp.extrapolation || {};
   const analogs = (mlp.analogs || []).map((a) =>
     `волна ${a.max_wave_m} м, ветер ${a.max_wind_ms} м/с, порт ${a.max_congestion_pct}% → задержка +${a.delay_h} ч`).join("; ");
   $("#ml-box").innerHTML =
-    `<div class="ml-head">${icon("activity")}ML-прогноз задержки <span class="chip chip-neutral">эксперимент</span></div>` +
+    `<div class="ml-head">${icon("activity")}ML: задержка оставшегося пути <span class="chip chip-neutral">эксперимент</span></div>` +
     renderGauge(ex) +
-    `<p>Модель: <b>+${mlp.ml_delay_h} ч</b>. Объяснимый расчёт по правилам коридора: <b>+${mlp.scoring_delay_h} ч</b>. ` +
-    (mlp.difference_h >= 10
-      ? `Расхождение ${mlp.difference_h} ч — модель и правила не согласны; в шторм доверяйте правилам: там каждый час подписан причиной.`
-      : `Расхождение всего ${mlp.difference_h} ч — модель и правила согласны, прогнозу можно верить.`) + `</p>` +
+    `<p>Модель: <b>${mlp.ml_delay_h == null ? "оценка недоступна" : "+" + esc(mlp.ml_delay_h) + " ч"}</b>. Оперативный расчёт: <b>${mlp.scoring_delay_h == null ? "—" : "+" + esc(mlp.scoring_delay_h) + " ч"}</b>. ` +
+    esc(mlp.reliability?.reason || "Совпадение моделей само по себе не подтверждает точность на реальных перевозках.") + `</p>` +
+    (mlp.interval ? `<p>Экспериментальный интервал ${Math.round(mlp.interval.level * 100)}%: ${esc(mlp.interval.lower_h)}–${esc(mlp.interval.upper_h)} ч. Покрытие проверено на отложенной части учебного набора.</p>` : "") +
     renderAttribution(mlp.local_attribution) +
-    (analogs ? `<div class="analogs">${icon("history")}<b>Похожие прошлые случаи:</b> при такой же погоде и загрузке грузы задерживались на ${esc(analogs)}. Это ориентир из истории, не точный прогноз.</div>` : "") +
-    `<div class="tech">Модель обучена на смоделированных задержках (реальная погода Open-Meteo + правила коридора), не на реальных рейсах — это эксперимент. Ансамбль RandomForest + HistGradientBoosting.</div>`;
+    (analogs ? `<div class="analogs">${icon("history")}<b>Похожие учебные примеры:</b> ${esc(analogs)}. ${mlp.dataset_kind === "synthetic" ? "Синтетические метки; это не реальные прошлые рейсы." : "История оператора; происхождение требует проверки."}</div>` : "") +
+    `<div class="tech">${esc(mlp.ml_model || "ML недоступен")} · ${esc(mlp.label_kind || mlp.status)}. Подробная оценка качества и сценарии доступны во вкладке «ML-прогноз» главного пульта.</div>`;
   const tl = await getJSON(`/api/shipments/${currentShipment}/timeline?storm=${storm}${scenarioQuery()}`);
   const statusIcon = { done: icon("check-circle"), in_progress: icon("refresh"), planned: icon("clock") };
   const actualHtml = (tl.actual_events || []).map((e) => `
@@ -546,12 +545,12 @@ async function runQuote() {
   const routeId = $("#quote-route").value;
   const weight = Math.max(1, +$("#quote-weight").value || 48);
   const fc = await getJSON(`/api/routes/${routeId}/forecast?weight_t=${weight}&storm=${storm}${scenarioQuery()}`);
-  const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}`);
+  const mlp = await getJSON(`/api/ml/forecast?route_id=${routeId}&weight_t=${weight}&storm=${storm}${scenarioQuery()}`);
   $("#quote-result").textContent =
     `${fc.route_name}: доставка ~${fc.total_predicted_h} ч (движение ${fc.total_base_h} ч` +
     (fc.total_wait_h ? ` + ожидание парома ${fc.total_wait_h} ч` : "") +
-    ` + задержки ${fc.delay_h} ч). Риск срыва срока ${Math.round(fc.delay_probability * 100)}%, срок с запасом (90%) ${fc.eta_p90_h} ч. ` +
-    `Прогноз модели: +${mlp.ml_delay_h} ч задержки. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
+    ` + задержки ${fc.delay_h} ч). Модельный индикатор задержки ${Math.round(fc.delay_probability * 100)}%; P90 симуляции ${fc.eta_p90_h} ч. Это не измеренная вероятность доставки. ` +
+    `Экспериментальный ML: ${mlp.ml_delay_h == null ? "недоступен" : "+" + mlp.ml_delay_h + " ч задержки"}. CO₂ ${(fc.co2_kg / 1000).toFixed(1)} т, ` +
     `стоимость ~$${fc.cost_usd.toLocaleString("ru-RU")}. ${fc.recommendation}`;
 }
 

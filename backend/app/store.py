@@ -151,6 +151,16 @@ CREATE TABLE IF NOT EXISTS operation_files (
     content BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS operation_files_shipment ON operation_files (shipment_id, seq);
+CREATE TABLE IF NOT EXISTS ml_snapshots (
+    id TEXT PRIMARY KEY,
+    shipment_id TEXT NOT NULL,
+    forecast_at TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    idempotency_key TEXT,
+    UNIQUE (shipment_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS ml_snapshots_shipment ON ml_snapshots (shipment_id, forecast_at);
 INSERT OR IGNORE INTO counters (name, value) VALUES ('shipment', 2000);
 """
 
@@ -759,4 +769,5 @@ def reset_demo() -> dict:
         conn.execute("DELETE FROM operation_economics")
         conn.execute("DELETE FROM operation_plans")
         conn.execute("DELETE FROM operation_files")
+        conn.execute("DELETE FROM ml_snapshots")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

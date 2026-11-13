@@ -103,14 +103,16 @@ textarea {
 }
 .skip {
   position: fixed;
-  top: -80px;
+  top: 5px;
+  left: 5px;
+  clip-path: inset(50%);
   z-index: 100;
   background: var(--mint);
   color: var(--bg);
   padding: 14px;
 }
 .skip:focus {
-  top: 5px;
+  clip-path: none;
 }
 .mono,
 .eyebrow,

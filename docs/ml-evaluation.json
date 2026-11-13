@@ -1,0 +1,246 @@
+{
+  "status": "ok",
+  "model_version": "sct-delay-v1",
+  "model_hash": "e4fc27605d3a49f0f892c04b22a3fc14537486b73aaf1e0b4b737a56962c62b8",
+  "selected_model": "random_forest",
+  "selection": {
+    "metric": "validation_mae_h",
+    "model": "random_forest",
+    "blend_weights": {
+      "random_forest": 0.75,
+      "hist_gradient_boosting": 0.25
+    },
+    "validation_metrics": {
+      "random_forest": {
+        "mae_h": 4.177,
+        "rmse_h": 6.094,
+        "r2": 0.8513,
+        "n": 120
+      },
+      "hist_gradient_boosting": {
+        "mae_h": 4.613,
+        "rmse_h": 7.468,
+        "r2": 0.7767,
+        "n": 120
+      },
+      "linear_regression": {
+        "mae_h": 5.938,
+        "rmse_h": 8.176,
+        "r2": 0.7323,
+        "n": 120
+      },
+      "median": {
+        "mae_h": 12.339,
+        "rmse_h": 15.998,
+        "r2": -0.0247,
+        "n": 120
+      },
+      "ensemble_rf_hgb": {
+        "mae_h": 4.207,
+        "rmse_h": 6.34,
+        "r2": 0.8391,
+        "n": 120
+      },
+      "ensemble_equal_weight": {
+        "mae_h": 4.305,
+        "rmse_h": 6.657,
+        "r2": 0.8226,
+        "n": 120
+      }
+    }
+  },
+  "dataset": {
+    "kind": "synthetic (corridor-rule delay labels with noise; archive weather marginals)",
+    "source_kind": "synthetic",
+    "scope": "remaining_route_snapshot",
+    "hash": "23c907c610683687f103a0e4e9fd9a9339ca4c66bc73fa49622bca87cd665bd4",
+    "n": 800,
+    "split": "random 55/15/15/15 (deterministic synthetic holdouts)",
+    "partitions": {
+      "train": {
+        "n_before_embargo": 440,
+        "excluded_unavailable_labels": 0,
+        "n": 440
+      },
+      "validation": {
+        "n_before_embargo": 120,
+        "excluded_unavailable_labels": 0,
+        "n": 120
+      },
+      "calibration": {
+        "n_before_embargo": 120,
+        "excluded_unavailable_labels": 0,
+        "n": 120
+      },
+      "test": {
+        "n_before_embargo": 120,
+        "excluded_unavailable_labels": 0,
+        "n": 120
+      }
+    },
+    "seed": 42,
+    "versions": {
+      "scikit-learn": "1.9.1",
+      "numpy": "2.5.4"
+    },
+    "source": "Open-Meteo archive + corridor simulator",
+    "shipment_identity_checked": null
+  },
+  "evaluation": {
+    "test_metrics": {
+      "random_forest": {
+        "mae_h": 3.683,
+        "rmse_h": 4.833,
+        "r2": 0.9025,
+        "n": 120
+      },
+      "hist_gradient_boosting": {
+        "mae_h": 4.039,
+        "rmse_h": 5.329,
+        "r2": 0.8814,
+        "n": 120
+      },
+      "linear_regression": {
+        "mae_h": 5.597,
+        "rmse_h": 8.044,
+        "r2": 0.7298,
+        "n": 120
+      },
+      "median": {
+        "mae_h": 11.484,
+        "rmse_h": 15.559,
+        "r2": -0.0107,
+        "n": 120
+      },
+      "ensemble_rf_hgb": {
+        "mae_h": 3.741,
+        "rmse_h": 4.834,
+        "r2": 0.9024,
+        "n": 120
+      },
+      "ensemble_equal_weight": {
+        "mae_h": 3.824,
+        "rmse_h": 4.92,
+        "r2": 0.8989,
+        "n": 120
+      }
+    },
+    "interval": {
+      "level": 0.9,
+      "method": "split_conformal_absolute_residual",
+      "coverage": 0.9167,
+      "n_covered": 110,
+      "mean_width_h": 15.085,
+      "n_test": 120,
+      "n_calibration": 120,
+      "radius_h": 7.897
+    },
+    "walk_forward": {
+      "status": "not_applicable"
+    }
+  },
+  "features": [
+    "max_wave_m",
+    "max_wind_ms",
+    "max_congestion_pct",
+    "total_customs_h",
+    "sea_km",
+    "rail_km",
+    "weight_t",
+    "sea_legs"
+  ],
+  "trained_on": "800 симуляций. Волна и ветер независимо взяты из архивных распределений Open-Meteo.",
+  "honest_note": "synthetic benchmark. Цели сгенерированы правилами и шумом. Результат измеряет качество на симуляциях.",
+  "models": [
+    "RandomForest",
+    "HistGradientBoosting",
+    "Ensemble RF + HGB",
+    "LinearRegression",
+    "Медиана обучающей выборки",
+    "Ensemble RF + HGB (50/50 reference)"
+  ],
+  "metrics": {
+    "random_forest": {
+      "mae_h": 3.683,
+      "rmse_h": 4.833,
+      "r2": 0.9025,
+      "n": 120
+    },
+    "hist_gradient_boosting": {
+      "mae_h": 4.039,
+      "rmse_h": 5.329,
+      "r2": 0.8814,
+      "n": 120
+    },
+    "linear_regression": {
+      "mae_h": 5.597,
+      "rmse_h": 8.044,
+      "r2": 0.7298,
+      "n": 120
+    },
+    "median": {
+      "mae_h": 11.484,
+      "rmse_h": 15.559,
+      "r2": -0.0107,
+      "n": 120
+    },
+    "ensemble_rf_hgb": {
+      "mae_h": 3.741,
+      "rmse_h": 4.834,
+      "r2": 0.9024,
+      "n": 120
+    },
+    "ensemble_equal_weight": {
+      "mae_h": 3.824,
+      "rmse_h": 4.92,
+      "r2": 0.8989,
+      "n": 120
+    }
+  },
+  "feature_importance": [
+    {
+      "feature": "max_congestion_pct",
+      "importance": 0.4295
+    },
+    {
+      "feature": "total_customs_h",
+      "importance": 0.2731
+    },
+    {
+      "feature": "max_wave_m",
+      "importance": 0.2113
+    },
+    {
+      "feature": "sea_legs",
+      "importance": 0.0313
+    },
+    {
+      "feature": "max_wind_ms",
+      "importance": 0.0226
+    },
+    {
+      "feature": "rail_km",
+      "importance": 0.0129
+    },
+    {
+      "feature": "weight_t",
+      "importance": 0.0099
+    },
+    {
+      "feature": "sea_km",
+      "importance": 0.0094
+    }
+  ],
+  "feature_importance_kind": "random_forest_impurity",
+  "n_train": 440,
+  "n_validation": 120,
+  "n_calibration": 120,
+  "n_test": 120,
+  "timing": {
+    "fit_evaluate_ms": 506.24,
+    "warm_predictions": 40,
+    "warm_p50_ms": 6.54,
+    "warm_p95_ms": 10.84,
+    "scope": "local Python forecast with prepared features and explanations; excludes HTTP, weather and database"
+  }
+}

@@ -229,7 +229,7 @@ def _projection(
     ports: dict, forecast: dict, now: datetime, transfer_usd: float = 0,
 ) -> dict:
     cursor = now
-    transport = co2 = idle = 0.0
+    transport = co2 = idle = base_remaining = 0.0
     predicted = []
     blocked_leg = None
     for index, leg in enumerate(legs):
@@ -256,12 +256,14 @@ def _projection(
             blocked_leg = {"id": leg["id"], "from": leg["from"], "to": leg["to"], "at": cursor.isoformat()}
             break
         travel_h, idle_h = prediction["predicted_h"], prediction["idle_h"]
+        base_h = leg["base_h"] + prediction["wait_h"]
         reported_delay = progress["delays"].get(leg["id"], 0)
         if active:
             predeparture_h = prediction["wait_h"]
             if leg["mode"] == "sea" and prediction["weather"]["wave_m"] >= 2:
                 predeparture_h += 48
             elapsed_h = max(0, (now - progress["departure"]).total_seconds() / 3600)
+            base_h = max(0, leg["base_h"] - elapsed_h)
             travel_h = max(0, travel_h + reported_delay - predeparture_h - elapsed_h)
             idle_h = min(travel_h, max(0, idle_h + reported_delay - predeparture_h))
         else:
@@ -272,9 +274,13 @@ def _projection(
             **prediction, "starts_at": cursor.isoformat(), "ends_at": ends.isoformat(),
             "remaining_h": round(travel_h, 1), "idle_h": round(idle_h, 1),
             "reported_delay_h": reported_delay, "in_transit": active,
+            "base_remaining_h": round(base_h, 3),
+            "effective_customs_h": customs + customs_extra,
+            "congestion_pct": port.get("congestion_pct", 0),
         })
         cursor = ends
         idle += idle_h
+        base_remaining += base_h
         # The transport on a departed leg is already committed.
         transport += 0 if active else model._leg_weight_cost(leg, shipment["weight_t"])
         co2 += model._leg_weight_co2(leg, shipment["weight_t"])
@@ -287,6 +293,7 @@ def _projection(
     return {
         "eta": None if blocked_leg else cursor.isoformat(),
         "remaining_h": None if blocked_leg else round(max(0, (cursor - now).total_seconds() / 3600), 1),
+        "base_remaining_h": None if blocked_leg else round(base_remaining, 3),
         "late_h": None if blocked_leg else round(late, 1), "transport_usd": None if blocked_leg else round(transport, 2),
         "idle_h": None if blocked_leg else round(idle, 1), "idle_usd": None if blocked_leg else idle_usd,
         "late_usd": None if blocked_leg else penalty, "transfer_usd": transfer_usd,
@@ -673,6 +680,11 @@ def create_router(guard_write) -> APIRouter:
             conn.execute("BEGIN")
             result = _detail(conn, _shipment(conn, shipment_id), scenario, _port_state(conn), forecast, now)
         return {**result, "horizon": _horizon([result], scenario, forecast, now)}
+
+    @router.get("/{shipment_id}/intelligence")
+    def shipment_intelligence(shipment_id: str, scenario: Annotated[dict, Depends(_scenario)]):
+        from app import operations_intelligence
+        return operations_intelligence.forecast(shipment_id, scenario)
 
     @router.post("/{shipment_id}/accept", dependencies=writes)
     def accept(
