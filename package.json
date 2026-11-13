@@ -1,6 +1,10 @@
 {
   "name": "caspian-command-center-checks",
   "private": true,
-  "scripts": { "test:ui": "node scripts/test_command_center.cjs", "test:ml-ui": "node scripts/test_intelligence_panel.cjs" },
+  "scripts": {
+    "test:ui": "node scripts/test_command_center.cjs",
+    "test:ml-ui": "node scripts/test_intelligence_panel.cjs",
+    "test:hackathon-ui": "node scripts/test_hackathon_workflow.cjs"
+  },
   "devDependencies": { "playwright": "1.65.0" }
 }

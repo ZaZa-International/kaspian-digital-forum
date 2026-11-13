@@ -21,6 +21,7 @@
     <link rel="stylesheet" href="/static/vendor/fonts.css" />
     <link rel="stylesheet" href="/static/command.css" />
     <link rel="stylesheet" href="/static/intelligence-panel.css" />
+    <link rel="stylesheet" href="/static/operations-labs.css" />
     <link rel="stylesheet" href="/static/freight-hero.css" />
     <script defer src="/static/vendor/gsap/gsap.min.js"></script>
     <script defer src="/static/vendor/gsap/ScrollTrigger.min.js"></script>
@@ -421,7 +422,17 @@
                 data-tab="intelligence"
                 tabindex="-1"
               >
-                ML-прогноз
+                ML-прогноз</button
+              ><button
+                type="button"
+                role="tab"
+                id="tab-resilience"
+                aria-selected="false"
+                aria-controls="view-resilience"
+                data-tab="resilience"
+                tabindex="-1"
+              >
+                Стыковки
               </button>
             </div>
           </div>
@@ -446,7 +457,17 @@
             role="tabpanel"
             aria-labelledby="tab-documents"
             hidden
-          ></div>
+          >
+            <div id="documents-content"></div>
+            <section class="operations-lab corridor-panel" id="corridor-panel" aria-labelledby="corridor-title">
+              <header class="lab-heading"><div><h4 id="corridor-title">Цифровой коридор</h4>
+                <p>Проверка документов по правилам маршрута и подписанная квитанция оператора. Государственное разрешение оформляется отдельно.</p></div>
+                <button type="button" class="lab-secondary" data-corridor-reload>Обновить проверку</button>
+              </header>
+              <p class="lab-status" data-corridor-status role="status"></p>
+              <div data-corridor-result></div>
+            </section>
+          </div>
           <div
             class="tab-view"
             id="view-events"
@@ -504,6 +525,28 @@
               <p class="intelligence-status" data-intelligence-journal-status role="status" aria-live="polite"></p>
               <div data-intelligence-journal-result></div>
             </details>
+          </div>
+          <div class="tab-view operations-lab" id="view-resilience" role="tabpanel" aria-labelledby="tab-resilience" hidden>
+            <header class="lab-heading"><div><h4>Успеет ли груз на паром?</h4>
+              <p>Сравните время готовности груза с закрытием погрузки. Расписание здесь задаётся для сценария.</p></div>
+              <span class="lab-context" data-resilience-context></span>
+            </header>
+            <form class="lab-form" id="resilience-form">
+              <label>Паром через, ч<input type="number" name="departure_in_h" min="6" max="168" step="0.1" value="24" required></label>
+              <label>Погрузка закрывается за, ч<input type="number" name="cutoff_h" min="0" max="24" step="0.1" value="6" required></label>
+              <label>Задержка подвоза, ч<input type="number" name="feeder_delay_h" min="0" max="72" step="0.1" value="0" required></label>
+              <label>Сократить время на таможне, %<input type="number" name="customs_reduction_pct" min="0" max="100" step="0.1" value="0" required></label>
+              <label>Приоритет маршрута<select name="profile">
+                <option value="balanced">Баланс и устойчивость</option>
+                <option value="time">Быстрее</option>
+                <option value="cost">Дешевле</option>
+                <option value="green">Меньше CO₂</option>
+              </select></label>
+              <button type="submit" class="lab-primary">Рассчитать</button>
+              <button type="button" class="lab-secondary" data-resilience-example>Пример порога</button>
+            </form>
+            <p class="lab-status" data-resilience-status role="status"></p>
+            <div data-resilience-result></div>
           </div>
         </div>
         <div class="advanced-row">

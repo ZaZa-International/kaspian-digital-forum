@@ -1,0 +1,7 @@
+СИНТЕТИЧЕСКИЙ ПРИМЕР. НЕ МОРСКАЯ НАКЛАДНАЯ.
+Вид: Морская накладная
+Document number: DEMO-SEA-1042
+Shipment ID: SHP-1042
+Weight: 48 t
+Destination: Bandar Abbas
+Cargo: 2 × 40ft, бытовая техника

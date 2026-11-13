@@ -7,3 +7,4 @@ scikit-learn==1.9.*
 numpy==2.5.*
 python-multipart==0.0.33
 pypdf==7.0.*
+cryptography==50.0.2

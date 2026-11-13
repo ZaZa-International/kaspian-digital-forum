@@ -1,4 +1,6 @@
 import { createIntelligencePanel } from "./intelligence-panel.js";
+import { createResiliencePanel } from "./resilience-panel.js";
+import { createCorridorPanel } from "./corridor-panel.js";
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => [...root.querySelectorAll(s)];
@@ -90,6 +92,9 @@ const state = {
 };
 let toastTimer, viewAbort, refreshAbort;
 const intelligence = createIntelligencePanel($("#view-intelligence"), api);
+const resilience = createResiliencePanel($("#view-resilience"), api);
+const corridor = createCorridorPanel($("#corridor-panel"), api, () => Boolean(state.demo));
+const operationPanels = [resilience, corridor];
 const query = (storm) =>
   new URLSearchParams({ storm: String(storm) }).toString();
 const canAnimate = () =>
@@ -385,8 +390,10 @@ function clearDetail(
   state.map?.setRoute({ id: "selected", nodes: [], legs: [] });
   updateHorizon();
   $("#detail-title").textContent = "Паспорт перевозки";
-  $$(".tab-view").filter((view) => view.id !== "view-intelligence").forEach((view) => view.replaceChildren());
+  ["#view-plan", "#view-economics", "#documents-content", "#view-events"]
+    .forEach((selector) => $(selector).replaceChildren());
   intelligence.clear();
+  operationPanels.forEach((panel) => panel.suspend());
   setDetailPending(false);
 }
 async function loadDetail(id) {
@@ -396,6 +403,7 @@ async function loadDetail(id) {
     detailIsCurrent() && id === state.selected ? state.proposal : null;
   state.selected = id;
   intelligence.suspend(id);
+  operationPanels.forEach((panel) => panel.suspend(id));
   renderList();
   viewAbort?.abort();
   const request = new AbortController();
@@ -419,12 +427,14 @@ async function loadDetail(id) {
       detail.proposals?.find((p) => p.id === previousProposal)?.id ??
       detail.proposals?.[0]?.id;
     renderDetail();
-    intelligence.setContext({
+    const context = {
       id, storm,
       status: detail.shipment.progress_status,
       version: detail.plan.version,
       sea: detail.baseline?.legs?.some((leg) => leg.mode === "sea"),
-    });
+    };
+    intelligence.setContext(context);
+    operationPanels.forEach((panel) => panel.setContext(context));
     return true;
   } catch (e) {
     if (e.name !== "AbortError" && seq === state.detailGeneration) {
@@ -459,7 +469,7 @@ function renderDetail() {
         ? "Груз в движении"
         : `На узле: ${nodeName(s.current_node)}`;
   $("#decision-content").innerHTML =
-    `<div><div class="cargo-id">${esc(s.id)} / ПЛАН V${esc(d.plan.version)}</div><h4>${esc(s.name)}</h4><p class="route-name">${esc(s.cargo)} · ${num(s.weight_t)} тонн</p><div class="decision-status"><i class="dot ${b.late_h > 0 ? "orange" : "mint"}"></i>${esc(position)}</div><div class="decision-eta"><span>Текущий прогноз прибытия</span><strong>${when(b.eta || s.eta)}</strong><small>${forecastNote}</small><button type="button" class="intelligence-link" data-open-intelligence>ML-прогноз <span aria-hidden="true">↗</span></button></div></div><div class="recommendation"><div class="eyebrow">${p ? "АЛЬТЕРНАТИВНЫЙ ПЛАН" : "ТЕКУЩИЙ ПЛАН"}</div><h4>${p ? esc(p.node_names?.join(" → ") || routeName(p.legs)) : "Продолжить по маршруту"}</h4><p>${p ? (p.conditional ? "Включает условные плечи. Подтвердите доступность перевозки." : "Пересчёт от доступного узла с сохранением пройденного пути.") : "Доступной альтернативы в текущем графе нет. Можно уточнить условия или добавить фактическое событие."}</p>${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>${p.delta_h == null ? "сравнение недоступно" : p.delta_h < 0 ? "экономия времени" : p.delta_h > 0 ? "дольше текущего" : "время без изменений"}</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>${p.delta_usd == null ? "сравнение недоступно" : p.delta_usd < 0 ? "расчётная экономия" : p.delta_usd > 0 ? "дополнительные расходы" : "стоимость без изменений"}</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ${svgArrow()}</button>` : ""}<p class="decision-footnote">Оценка по модели и заданным ставкам. Решение сохраняется только после вашего подтверждения.</p></div>`;
+    `<div><div class="cargo-id">${esc(s.id)} / ПЛАН V${esc(d.plan.version)}</div><h4>${esc(s.name)}</h4><p class="route-name">${esc(s.cargo)} · ${num(s.weight_t)} тонн</p><div class="decision-status"><i class="dot ${b.late_h > 0 ? "orange" : "mint"}"></i>${esc(position)}</div><div class="decision-eta"><span>Текущий прогноз прибытия</span><strong>${when(b.eta || s.eta)}</strong><small>${forecastNote}</small><div class="decision-shortcuts"><button type="button" class="intelligence-link" data-open-passport="intelligence">ML-прогноз <span aria-hidden="true">↗</span></button><button type="button" class="intelligence-link" data-open-passport="resilience">Стыковки <span aria-hidden="true">↗</span></button><button type="button" class="intelligence-link" data-open-passport="documents">Коридор <span aria-hidden="true">↗</span></button></div></div></div><div class="recommendation"><div class="eyebrow">${p ? "АЛЬТЕРНАТИВНЫЙ ПЛАН" : "ТЕКУЩИЙ ПЛАН"}</div><h4>${p ? esc(p.node_names?.join(" → ") || routeName(p.legs)) : "Продолжить по маршруту"}</h4><p>${p ? (p.conditional ? "Включает условные плечи. Подтвердите доступность перевозки." : "Пересчёт от доступного узла с сохранением пройденного пути.") : "Доступной альтернативы в текущем графе нет. Можно уточнить условия или добавить фактическое событие."}</p>${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>${p.delta_h == null ? "сравнение недоступно" : p.delta_h < 0 ? "экономия времени" : p.delta_h > 0 ? "дольше текущего" : "время без изменений"}</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>${p.delta_usd == null ? "сравнение недоступно" : p.delta_usd < 0 ? "расчётная экономия" : p.delta_usd > 0 ? "дополнительные расходы" : "стоимость без изменений"}</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ${svgArrow()}</button>` : ""}<p class="decision-footnote">Оценка по модели и заданным ставкам. Решение сохраняется только после вашего подтверждения.</p></div>`;
   renderPlan();
   renderEconomics();
   renderDocuments();
@@ -501,7 +511,7 @@ function costList(b) {
 function renderDocuments() {
   const docs = state.detail.documents || {},
     req = docs.requirements || [];
-  $("#view-documents").innerHTML =
+  $("#documents-content").innerHTML =
     `<div class="document-grid"><div><div class="document-head" style="margin-bottom:20px"><h4 style="font-weight:500">Комплект перевозки</h4>${docChip(docs.status)}</div>${
       req
         .map(
@@ -546,12 +556,15 @@ function setTab(tab) {
   });
   $$(".tab-view").forEach((v) => (v.hidden = v.id !== `view-${tab}`));
   intelligence.setActive(tab === "intelligence");
+  resilience.setActive(tab === "resilience");
+  corridor.setActive(tab === "documents");
 }
 async function setStorm(value) {
   if (state.storm === value) return detailIsCurrent();
   state.storm = value;
   state.detailGeneration++;
   intelligence.suspend(state.selected);
+  operationPanels.forEach((panel) => panel.suspend(state.selected));
   viewAbort?.abort();
   setDetailPending(true);
   state.preview = null;
@@ -587,6 +600,10 @@ function updateHorizon(plan = state.preview || state.detail?.plan) {
     : "Положение груза по модели. Факты не изменяются.";
 }
 function showPlanReview() {
+  if (state.demo) {
+    notify("Закройте демонстрацию, чтобы принять план.");
+    return;
+  }
   const d = state.detail,
     p = activeProposal(),
     dialog = $("#accept-dialog");
@@ -756,12 +773,16 @@ const demoSteps = [
     "Сравните альтернативу на карте: выигрыш времени и полную стоимость.",
   ],
   [
-    "04 / Экономика решения",
-    "Стоимость простоя и штрафы задаются вами. Расчёт показывает цену альтернативы.",
+    "04 / Граница погрузки",
+    "В примере сокращение очереди помогает успеть на ранний паром. Расписание условное.",
   ],
   [
-    "05 / Решение остаётся в истории",
-    "Примите новый план в карточке груза. Демонстрация сама не меняет маршрут.",
+    "05 / ML и расчёт по правилам",
+    "Сравните оценки задержки, интервал и причины низкой надёжности модели.",
+  ],
+  [
+    "06 / Цифровой коридор",
+    "Проверьте документы и статус подписанных квитанций. Демонстрация не выпускает квитанции.",
   ],
 ];
 function updateDemoProgress(demo) {
@@ -774,15 +795,15 @@ async function demoStep(index) {
   const step = Math.max(0, Math.min(demoSteps.length - 1, index));
   const request = ++demo.request;
   demo.step = step;
-  demo.elapsed = step * 18;
+  demo.elapsed = step * (90 / demoSteps.length);
   updateDemoProgress(demo);
   const [title, text] = demoSteps[step];
   $("#demo-title").textContent = title;
   $("#demo-description").textContent = text;
   $("#demo-prev").disabled = step === 0;
   $("#demo-next").disabled = step === demoSteps.length - 1;
-  const changedStorm = state.storm !== step > 0;
-  if (changedStorm) await setStorm(step > 0);
+  const storm = step === 1 || step === 2;
+  if (state.storm !== storm) await setStorm(storm);
   else if (
     !detailIsCurrent() ||
     $("#decision-panel").getAttribute("aria-busy") === "true"
@@ -793,16 +814,13 @@ async function demoStep(index) {
     const proposal = activeProposal();
     if (proposal) previewRoute(proposal);
   }
-  setTab(step === 3 ? "economics" : "plan");
-  if (step === 3)
-    $(".workspace-detail").scrollIntoView({
-      behavior: canAnimate() ? "smooth" : "auto",
-      block: "center",
-    });
-  if (step === 4)
-    $("#operations").scrollIntoView({
-      behavior: canAnimate() ? "smooth" : "auto",
-    });
+  const tabs = ["plan", "plan", "plan", "resilience", "intelligence", "documents"];
+  setTab(tabs[step]);
+  if (step === 3) resilience.example();
+  if (step >= 3) {
+    const target = step === 5 ? $("#corridor-panel") : $(".workspace-detail");
+    target.scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
+  }
 }
 async function startDemo() {
   const start = $("#start-demo");
@@ -838,7 +856,7 @@ async function startDemo() {
       updateDemoProgress(demo);
       const step = Math.min(
         demoSteps.length - 1,
-        Math.floor(demo.elapsed / 18),
+        Math.floor(demo.elapsed / (90 / demoSteps.length)),
       );
       if (step !== demo.step) demoStep(step);
       if (demo.elapsed >= 90) {
@@ -1022,10 +1040,12 @@ document.addEventListener("click", async (e) => {
     renderList();
   }
   if (b.dataset.tab) setTab(b.dataset.tab);
-  if (b.hasAttribute("data-open-intelligence")) {
-    setTab("intelligence");
-    $("#tab-intelligence").focus({ preventScroll: true });
-    $(".workspace-detail").scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
+  if (b.dataset.openPassport) {
+    const tab = b.dataset.openPassport;
+    setTab(tab);
+    $(`#tab-${tab}`).focus({ preventScroll: true });
+    (tab === "documents" ? $("#corridor-panel") : $(".workspace-detail"))
+      .scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
   }
   if (b.dataset.proposal && detailIsCurrent()) {
     state.proposal = b.dataset.proposal;
@@ -1035,7 +1055,7 @@ document.addEventListener("click", async (e) => {
   if (b.id === "review-plan") showPlanReview();
 });
 document.addEventListener("submit", (e) => {
-  if (e.target.matches("form:not(#intelligence-scenario)")) {
+  if (e.target.matches("form:not(#intelligence-scenario):not(#resilience-form)")) {
     e.preventDefault();
     submitForm(e.target);
   }
@@ -1101,6 +1121,7 @@ window.addEventListener(
     viewAbort?.abort();
     refreshAbort?.abort();
     intelligence.suspend();
+    operationPanels.forEach((panel) => panel.suspend());
   },
   { once: true },
 );

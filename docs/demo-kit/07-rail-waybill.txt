@@ -1,0 +1,7 @@
+СИНТЕТИЧЕСКИЙ ПРИМЕР. НЕ ЖЕЛЕЗНОДОРОЖНАЯ НАКЛАДНАЯ.
+Вид: Железнодорожная накладная
+Document number: DEMO-RAIL-1042
+Shipment ID: SHP-1042
+Weight: 48 t
+Destination: Bandar Abbas
+Cargo: 2 × 40ft, бытовая техника
