@@ -1,8 +1,9 @@
 /* Offline cache for static assets only (never API responses).
-   v6: «Caspian Ops» redesign — network-first for the app shell (HTML, app.js,
-   styles.css) so fresh deployments are never hidden by a stale cache;
+   v7: cache-bust for the visible-features deploy (animated map, radar, live
+   twin, recommendations, alerts). Network-first for the app shell (HTML,
+   app.js, styles.css) so fresh deployments are never hidden by a stale cache;
    cache-first for vendor assets incl. self-hosted fonts; offline fallback. */
-const CACHE = "sct-static-v6";
+const CACHE = "sct-static-v7";
 const ASSETS = ["/", "/static/styles.css", "/static/app.js",
                 "/static/manifest.json", "/static/icon-192.png", "/static/icon-512.png",
                 "/static/vendor/fonts.css",
