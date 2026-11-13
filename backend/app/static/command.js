@@ -82,7 +82,6 @@ const state = {
   tab: "plan",
   token: "",
   nodes: {},
-  hero: null,
   map: null,
   generation: 0,
   detailGeneration: 0,
@@ -90,6 +89,17 @@ const state = {
   review: null,
   demo: null,
 };
+const routeParts = location.pathname.split("/").filter(Boolean);
+const passport = routeParts[0] === "app" && routeParts[1] === "shipments" && routeParts.length === 3;
+const queryParams = new URLSearchParams(location.search);
+const tabIds = ["plan", "economics", "documents", "events", "intelligence", "resilience"];
+let passportId;
+if (passport) {
+  try { passportId = decodeURIComponent(routeParts[2]); } catch { passportId = routeParts[2]; }
+  state.selected = passportId;
+}
+try { state.token = sessionStorage.getItem("caspian-operator-token") || ""; } catch {}
+
 let toastTimer, viewAbort, refreshAbort;
 const intelligence = createIntelligencePanel($("#view-intelligence"), api);
 const resilience = createResiliencePanel($("#view-resilience"), api);
@@ -313,7 +323,7 @@ async function refresh({ keepSelection = true } = {}) {
     if (generation !== state.generation) return false;
     state.data = data;
     const rows = data.shipments || [];
-    if (!keepSelection || !rows.some((s) => s.id === state.selected))
+    if (!passport && (!keepSelection || !rows.some((s) => s.id === state.selected)))
       state.selected = rows[0]?.id;
     $("#metric-count").textContent = num(
       data.summary?.shipment_count ?? rows.length,
@@ -357,7 +367,15 @@ async function refresh({ keepSelection = true } = {}) {
     if (generation === state.generation) $("#refresh").disabled = false;
   }
 }
+function passportLink(id, tab = state.tab) {
+  const path = "/app/shipments/" + encodeURIComponent(id);
+  return tab === "plan" ? path : path + "?" + new URLSearchParams({ tab });
+}
 function renderList() {
+  const mobileSwitch = $("#passport-mobile-select");
+  mobileSwitch.innerHTML = (state.data?.shipments || []).map((shipment) =>
+    `<option value="${esc(shipment.id)}" ${shipment.id === state.selected ? "selected" : ""}>${esc(shipment.id)} · ${esc(shipment.name)}</option>`
+  ).join("");
   const search = $("#cargo-search").value.trim().toLocaleLowerCase();
   const rows = (state.data?.shipments || []).filter(
     (s) =>
@@ -375,7 +393,7 @@ function renderList() {
     rows
       .map(
         (s) =>
-          `<button class="cargo-item ${s.id === state.selected ? "selected" : ""}" data-shipment="${esc(s.id)}" aria-pressed="${s.id === state.selected}"><div class="row"><span class="id">${esc(s.id)}</span><span class="chip ${s.blocked || s.late_h > 0 ? "orange" : "mint"}">${s.blocked ? "Ограничение" : s.late_h > 0 ? "+" + num(s.late_h) + " ч" : s.progress_status === "delivered" ? "Доставлен" : "В работе"}</span></div><strong>${esc(s.name)}</strong><p class="cargo-route">${esc(s.current_node ? nodeName(s.current_node) : "На маршруте")} · ${num(s.weight_t)} т</p><div class="cargo-meta"><span>${when(s.eta)}</span><span class="${s.blocked || s.late_h > 0 ? "late" : ""}">${s.blocked || s.late_h > 0 ? "Есть риск" : "План v" + (s.plan_version ?? 1)}</span></div></button>`,
+          `<a href="${passportLink(s.id)}" class="cargo-item ${s.id === state.selected ? "selected" : ""}" data-shipment-link="${esc(s.id)}" ${s.id === state.selected ? 'aria-current="page"' : ""}><div class="row"><span class="id">${esc(s.id)}</span><span class="chip ${s.blocked || s.late_h > 0 ? "orange" : "mint"}">${s.blocked ? "Ограничение" : s.late_h > 0 ? "+" + num(s.late_h) + " ч" : s.progress_status === "delivered" ? "Доставлен" : "В работе"}</span></div><strong>${esc(s.name)}</strong><p class="cargo-route">${esc(s.current_node ? nodeName(s.current_node) : "На маршруте")} · ${num(s.weight_t)} т</p><div class="cargo-meta"><span>${when(s.eta)}</span><span class="${s.blocked || s.late_h > 0 ? "late" : ""}">${s.blocked || s.late_h > 0 ? "Есть риск" : "План v" + (s.plan_version ?? 1)}</span></div></a>`,
       )
       .join("") || '<p class="empty-state">По этому фильтру перевозок нет.</p>';
 }
@@ -457,6 +475,11 @@ function renderDetail() {
     b = d.baseline || {},
     p = activeProposal();
   $("#detail-title").textContent = `${s.id} · ${s.name}`;
+  if (passport) {
+    $("#workspace-heading").textContent = s.name;
+    $("#workspace-description").textContent = `${s.id} · ${s.cargo} · План v${d.plan.version}`;
+    document.title = `${s.name} · Caspian`;
+  }
   const forecastNote = b.blocked
     ? "Движение по текущему плану ограничено"
     : b.remaining_h == null
@@ -547,7 +570,8 @@ function renderEvents() {
         .join("") || '<li class="muted">Фактических событий пока нет.</li>'
     }</ul></div><form id="event-form"><div class="form-grid"><label>Событие<select name="event_type"><option value="note">Заметка</option><option value="departure">Отправление</option><option value="arrival">Прибытие</option><option value="delay">Задержка</option><option value="load">Погрузка</option><option value="discharge">Разгрузка</option><option value="customs_start">Проверка документов</option><option value="customs_done">Документы проверены</option></select></label><label>Плечо<select name="leg_id"><option value="">— без привязки —</option>${active.map((l) => `<option value="${esc(l.id)}">${esc(nodeName(l.from))} → ${esc(nodeName(l.to))}</option>`).join("")}</select></label><label>Время факта<input name="occurred_ts" type="datetime-local"></label><label>Задержка, часов<input name="delay_h" type="number" min="0" max="720" step="0.5" value="0"></label></div><label>Комментарий<textarea name="note" maxlength="300" placeholder="Что произошло на маршруте"></textarea></label><p class="form-note">Прибытие и отправление обновляют положение груза. Для них выберите соответствующее плечо. Пустое время означает «сейчас».</p><p class="form-error" role="alert"></p><button class="button primary">Записать событие ↗</button></form></div>`;
 }
-function setTab(tab) {
+function setTab(tab, { historyMode = "push" } = {}) {
+  if (!tabIds.includes(tab)) tab = "plan";
   state.tab = tab;
   $$("[data-tab]").forEach((b) => {
     const active = b.dataset.tab === tab;
@@ -555,9 +579,16 @@ function setTab(tab) {
     b.tabIndex = active ? 0 : -1;
   });
   $$(".tab-view").forEach((v) => (v.hidden = v.id !== `view-${tab}`));
+  $$("[data-shipment-link]").forEach((link) => { link.href = passportLink(link.dataset.shipmentLink, tab); });
   intelligence.setActive(tab === "intelligence");
   resilience.setActive(tab === "resilience");
   corridor.setActive(tab === "documents");
+  if (passport && !state.demo && historyMode) {
+    const url = new URL(location.href);
+    if (tab === "plan") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", tab);
+    if (url.href !== location.href) history[historyMode + "State"](null, "", url);
+  }
 }
 async function setStorm(value) {
   if (state.storm === value) return detailIsCurrent();
@@ -728,7 +759,7 @@ async function submitForm(form) {
     if (form.id === "create-form") {
       const s = await api("/api/shipments", {
         method: "POST",
-        headers: { "Idempotency-Key": crypto.randomUUID() },
+        headers: { "Idempotency-Key": form.dataset.key ||= crypto.randomUUID() },
         body: JSON.stringify({
           name: fd.get("name"),
           cargo: fd.get("cargo"),
@@ -736,17 +767,17 @@ async function submitForm(form) {
           route_id: fd.get("route_id"),
         }),
       });
-      state.selected = s.id || s.shipment?.id;
       $("#create-dialog").close();
       form.reset();
-      notify("Перевозка создана.");
-      await refresh();
-      $("#operations").scrollIntoView({
-        behavior: canAnimate() ? "smooth" : "auto",
-      });
+      delete form.dataset.key;
+      location.assign("/app/shipments/" + encodeURIComponent(s.id || s.shipment?.id));
     }
     if (form.id === "access-form") {
       state.token = String(fd.get("token") || "");
+      try {
+        if (state.token) sessionStorage.setItem("caspian-operator-token", state.token);
+        else sessionStorage.removeItem("caspian-operator-token");
+      } catch {}
       form.reset();
       $("#access-dialog").close();
       notify("Ключ применён к этой вкладке.");
@@ -842,6 +873,11 @@ async function startDemo() {
     const seed = state.data.shipments.find(
       (shipment) => shipment.id === "SHP-1042",
     );
+    if (passport && passportId !== seed?.id) {
+      state.demo = null;
+      location.assign("/app/shipments/SHP-1042?demo=1");
+      return;
+    }
     if (seed) state.selected = seed.id;
     $("#demo-bar").hidden = false;
     $("#demo-pause").textContent = "Пауза";
@@ -880,140 +916,25 @@ async function closeDemo() {
   if (state.storm !== previous.storm) await setStorm(previous.storm);
   else await refresh();
 }
-function storyMotion() {
-  // Freight Services owns the scroll narrative; the geographic atlas stays interactive.
-  if (document.querySelector(".atlas-section")) return;
-  if (!window.gsap || !window.ScrollTrigger) return;
-  gsap.registerPlugin(ScrollTrigger);
-  const mm = gsap.matchMedia();
-  mm.add(
-    "(min-width: 801px) and (prefers-reduced-motion: no-preference)",
-    () => {
-      const hero = $("#hero-copy");
-      const story = $("#story-copy");
-      const dots = $$(".chapter-dots>span");
-      const readout = $("#hero-readout");
-      const chapters = [
-        { route: "R1", readout: "R1 · Махачкала → Амирабад" },
-        {
-          route: "R1",
-          readout: "R1 · шторм ограничивает морское плечо",
-          index: "02 / ПРЕДВИДЕТЬ",
-          title: "Шторм меняет<br>весь маршрут.",
-          text: "Задержка в порту становится цепочкой сорванных стыковок. Смотрите, какие грузы окажутся под угрозой.",
-        },
-        {
-          route: "R3",
-          readout: "R3 · сухопутный обход через Баку",
-          index: "03 / ДЕЙСТВОВАТЬ",
-          title: "Есть путь.<br>Есть решение.",
-          text: "Сравните время, расходы и документы. Сохраните новый план, пока груз ещё можно перенаправить.",
-        },
-      ];
-      let last = -1;
-      const progress = { value: 0 };
-      function updateStory() {
-        const p = progress.value;
-        state.hero?.setStoryProgress(p);
-        const index = p < 0.24 ? 0 : p < 0.65 ? 1 : 2;
-        if (index === last) return;
-        last = index;
-        const chapter = chapters[index];
-        dots.forEach((dot, i) => dot.classList.toggle("active", i === index));
-        hero.inert = index !== 0;
-        story.hidden = index === 0;
-        state.hero?.setScenario({
-          storm: index === 1,
-          horizon: index === 1 ? 48 : 0,
-        });
-        state.hero?.setRoute(chapter.route);
-        readout.textContent = chapter.readout;
-        if (index !== 0) {
-          $("#story-index").textContent = chapter.index;
-          $("#story-title").innerHTML = chapter.title;
-          $("#story-text").textContent = chapter.text;
-        }
-      }
-      gsap.from(
-        ".hero-copy .eyebrow, .hero-copy h1, .hero-copy p, .hero-actions",
-        {
-          y: 18,
-          opacity: 0,
-          duration: 0.55,
-          stagger: 0.06,
-          ease: "power3.out",
-        },
-      );
-      const timeline = gsap.timeline({
-        onUpdate: updateStory,
-        scrollTrigger: {
-          trigger: ".journey",
-          start: "top top",
-          end: "bottom bottom",
-          scrub: 0.6,
-        },
-      });
-      timeline.to(progress, { value: 1, duration: 1, ease: "none" }, 0);
-      timeline.to(hero, { y: -35, opacity: 0, duration: 0.18 }, 0.05);
-      gsap.utils
-        .toArray(".value-strip>div,.section-heading,.closing h2")
-        .forEach((el) =>
-          gsap.from(el, {
-            y: 22,
-            opacity: 0,
-            duration: 0.55,
-            ease: "power3.out",
-            scrollTrigger: { trigger: el, start: "top 90%", once: true },
-          }),
-        );
-      updateStory();
-      return () => {
-        hero.inert = false;
-        story.hidden = true;
-        dots.forEach((dot, i) => dot.classList.toggle("active", i === 0));
-        state.hero?.setStoryProgress(0);
-        state.hero?.setScenario({ storm: false, horizon: 0 });
-        state.hero?.setRoute("R1");
-        readout.textContent = chapters[0].readout;
-      };
-    },
-  );
-  window.addEventListener("pagehide", () => mm.revert(), { once: true });
-}
 async function scenes() {
   try {
-    const { createCaspianScene } = await import("/static/caspian-scene.js");
-    state.hero = await createCaspianScene($("#hero-map"), {
-      mode: "hero",
-      onPortSelect: (port) => showPort(port, "hero"),
-    });
-    state.map = await createCaspianScene($("#ops-map"), {
+    const { createMapController } = await import("/static/map-controller.js");
+    state.map = await createMapController($("#ops-map"), {
       mode: "ops",
-      onPortSelect: (port) => showPort(port, "ops"),
+      onPortSelect: (id, node) => showPort(id, node),
     });
     if (detailIsCurrent()) sceneRoute(state.preview || state.detail.plan);
-    state.map?.setScenario({ storm: state.storm, horizon: state.horizon });
-  } catch (e) {
-    console.warn("Map unavailable:", e);
-    if (!state.hero)
-      $("#hero-map").innerHTML =
-        '<div class="empty-state" style="padding:25% 15%">Карта временно недоступна. Перевозки и расчёты доступны в центре управления.</div>';
-    if (!state.map)
-      $("#ops-map").innerHTML =
-        '<p class="empty-state">Не удалось загрузить карту. Текстовый маршрут доступен в паспорте.</p>';
+    state.map.setScenario({ storm: state.storm, horizon: state.horizon });
+  } catch (error) {
+    console.warn("Map unavailable:", error);
+    $("#ops-map").innerHTML = '<p class="empty-state">Не удалось загрузить карту. Текстовый маршрут доступен в паспорте.</p>';
   }
-  storyMotion();
 }
-function showPort(port, mode) {
-  const id = typeof port === "string" ? port : port.id;
-  const node = state.nodes[id] || port;
-  const label = `${node.name || id} · ${node.country || "Узел коридора"}`;
-  if (mode === "hero") {
-    $("#hero-readout").textContent = label;
-    return;
-  }
+function showPort(id, mapNode) {
+  const node = state.nodes[id] || mapNode;
+  const label = `${node?.name || id} · ${node?.country || "Узел коридора"}`;
   const info = $("#port-info");
-  info.textContent = `${label} · Нажмите на груз, чтобы вернуться к его маршруту.`;
+  info.textContent = label;
   info.hidden = false;
 }
 function previewRoute(proposal) {
@@ -1024,7 +945,10 @@ function previewRoute(proposal) {
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button,a");
   if (!b) return;
-  if (b.dataset.open) $("#" + b.dataset.open).showModal();
+  if (b.dataset.open) {
+    if (b.dataset.open === "access-dialog") $("#access-form [name=token]").value = state.token;
+    $("#" + b.dataset.open).showModal();
+  }
   if (b.hasAttribute("data-close")) b.closest("dialog").close();
   if (b.dataset.shipment) {
     $("#port-info").hidden = true;
@@ -1079,6 +1003,9 @@ $$("[role=tab]").forEach((tab) =>
   }),
 );
 $("#cargo-search").addEventListener("input", renderList);
+$("#passport-mobile-select").addEventListener("change", (event) => {
+  if (event.target.value) location.assign(passportLink(event.target.value));
+});
 $("#refresh").addEventListener("click", () => refresh());
 $("#calm").addEventListener("click", () => setStorm(false));
 $("#storm").addEventListener("click", () => setStorm(true));
@@ -1087,7 +1014,7 @@ $("#horizon").addEventListener("input", (e) => {
   updateHorizon();
 });
 $("#accept-confirm").addEventListener("click", acceptPlan);
-$("#start-demo").addEventListener("click", startDemo);
+$("#start-demo")?.addEventListener("click", startDemo);
 $("#demo-close").addEventListener("click", closeDemo);
 $("#demo-prev").addEventListener("click", () => {
   if (state.demo) demoStep(state.demo.step - 1);
@@ -1114,8 +1041,8 @@ window.addEventListener("offline", () => {
 window.addEventListener("online", () => refresh());
 window.addEventListener(
   "pagehide",
-  () => {
-    state.hero?.dispose();
+  (event) => {
+    if (event.persisted) return;
     state.map?.dispose();
     clearInterval(state.demo?.timer);
     viewAbort?.abort();
@@ -1126,6 +1053,11 @@ window.addEventListener(
   { once: true },
 );
 async function init() {
+  const deepTab = queryParams.get("tab");
+  setTab(deepTab || "plan", { historyMode: "" });
+  window.addEventListener("popstate", () =>
+    setTab(new URLSearchParams(location.search).get("tab") || "plan", { historyMode: "" }));
+  if (queryParams.has("create")) $("#create-dialog").showModal();
   try {
     const d = await api("/api/nodes");
     state.nodes = Object.fromEntries(d.nodes.map((n) => [n.id, n]));
@@ -1133,6 +1065,14 @@ async function init() {
     report(e);
   }
   await Promise.allSettled([scenes(), refresh()]);
+  if (queryParams.has("demo")) {
+    const url = new URL(location.href);
+    url.searchParams.delete("demo");
+    history.replaceState(null, "", url);
+    startDemo();
+  } else if (deepTab && deepTab !== "plan" && tabIds.includes(deepTab) && state.tab === deepTab) {
+    $(".workspace-detail").scrollIntoView({ behavior: canAnimate() ? "smooth" : "instant" });
+  }
   if ("serviceWorker" in navigator)
     navigator.serviceWorker.register("/sw.js").catch(() => {});
 }

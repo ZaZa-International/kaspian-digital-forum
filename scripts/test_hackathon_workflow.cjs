@@ -54,7 +54,7 @@ async function main() {
   page.on("request", (request) => {
     if (request.url().includes("/api/") && request.method() !== "GET") writes.push(request);
   });
-  await page.goto(base);
+  await page.goto(base + "/app/shipments/SHP-1042");
   await page.getByRole("tab", { name: "Стыковки" }).click();
   const lab = page.locator("#view-resilience");
   await lab.locator(".lab-cliff").waitFor();
@@ -82,9 +82,9 @@ async function main() {
     assert.equal((await (await requested).json()).decision.profile, value);
     await waitText(lab, "Предпросмотр · принятый план не изменён");
   }
-  await page.locator("[data-shipment=SHP-1044]").click();
+  await page.locator("[data-shipment-link=SHP-1044]").click();
   await waitText(lab, "Оставшийся путь без парома");
-  await page.locator("[data-shipment=SHP-1042]").click();
+  await page.locator("[data-shipment-link=SHP-1042]").click();
   await lab.locator(".lab-cliff").waitFor();
   const newShipment = await post(page, "/api/shipments", {
     headers: { ...headers, "Idempotency-Key": "hackathon-transit-fixture" },
@@ -100,9 +100,9 @@ async function main() {
     assert.ok(event.ok(), await event.text());
   }
   await page.locator("#refresh").click();
-  await page.locator(`[data-shipment="${id}"]`).click();
+  await page.locator(`[data-shipment-link="${id}"]`).click();
   await waitText(lab, "Груз уже на морском плече");
-  await page.locator("[data-shipment=SHP-1042]").click();
+  await page.locator("[data-shipment-link=SHP-1042]").click();
   await lab.locator(".lab-cliff").waitFor();
   console.log("PASS all route profiles, land-only and already-sailed states");
 
@@ -112,7 +112,7 @@ async function main() {
   await issue.waitFor();
   await issue.click();
   await waitText(corridor, "Нужен ключ оператора. Откройте «Ключ доступа».");
-  await page.getByRole("button", { name: "Ключ доступа", exact: true }).click();
+  await page.getByRole("button", { name: "Ключ доступа", exact: true }).first().click();
   await page.getByRole("textbox", { name: "Ключ оператора" }).fill(token);
   await page.getByRole("button", { name: "Применить ключ" }).click();
   await issue.click();
@@ -174,7 +174,7 @@ async function main() {
     hasTouch: true, reducedMotion: "reduce", serviceWorkers: "block",
   });
   mobile.on("pageerror", (error) => errors.push(error.message));
-  await mobile.goto(base);
+  await mobile.goto(base + "/app/shipments/SHP-1042");
   await mobile.getByRole("tab", { name: "Стыковки" }).click();
   await mobile.locator("#view-resilience .lab-cliff").waitFor();
   await mobile.locator(".lab-route-list > li").first().waitFor();

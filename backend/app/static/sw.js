@@ -1,7 +1,15 @@
 /* Cache static presentation only. Cargo, tokens and API responses never enter this cache. */
-const CACHE = "sct-static-v11";
+const CACHE = "sct-static-v13";
 const ASSETS = [
   "/",
+  "/app",
+  "/app/shipments/SHP-1042",
+  "/static/home.js",
+  "/static/workspace.js",
+  "/static/workspace.css",
+  "/static/map-controller.js",
+  "/static/flat-map.js",
+  "/static/flat-map.css",
   "/static/laboratory.html",
   "/static/command.css",
   "/static/command.js",
@@ -86,6 +94,9 @@ self.addEventListener("fetch", (e) => {
       } catch {
         return (
           (await caches.match(e.request)) ||
+          (e.request.mode === "navigate" && url.pathname.startsWith("/app")
+            ? await caches.match(/^\/app\/shipments\/[^/]+$/.test(url.pathname) ? "/app/shipments/SHP-1042" : "/app")
+            : undefined) ||
           new Response("Нет сети. Этот ресурс ещё не сохранён.", {
             status: 503,
             headers: { "Content-Type": "text/plain; charset=utf-8" },

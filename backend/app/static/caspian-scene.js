@@ -161,6 +161,9 @@ const NODES = Object.fromEntries(
     { id: "bandar_abbas", name: "Бендер-Аббас", lat: 27.19, lon: 56.27 },
   ].map((p) => [p.id, p]),
 );
+
+// Both map modes use the same corridor coordinates and route normalization.
+export { NODES as CASPIAN_NODES, routeDefinition as normalizeCaspianRoute };
 const ROUTES = {
   R1: {
     id: "R1",

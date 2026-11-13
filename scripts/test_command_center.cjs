@@ -70,20 +70,9 @@ async function main() {
   const get = async (id) =>
     (await page.request.get(`${base}/api/operations/${id}`)).json();
   await page.goto(base, { waitUntil: "networkidle" });
-  await until(
-    () =>
-      page
-        .locator("[data-shipment]")
-        .count()
-        .then((n) => n === 3),
-    "three seed shipments",
-  );
-  await page.locator("#review-plan").waitFor();
-  assert.equal(await page.locator("[data-renderer=webgl]").count(), 2);
-  pass(
-    "desktop dashboard + both WebGL scenes",
-    "3 shipments, 2 WebGL renderers, populated recommendation",
-  );
+  await page.locator("#hero-map canvas").waitFor();
+  assert.equal(await page.locator("#operations").count(), 0);
+  pass("home keeps the geographic atlas and separates the workbench");
   await page.screenshot({ path: path.join(output, "desktop-hero.png") });
   await page.evaluate(() => scrollTo({ top: 600, behavior: "instant" }));
   await until(
@@ -109,6 +98,11 @@ async function main() {
     "freight video reverses",
   );
   pass("freight video scrubs forward and backward without autoplay");
+  await page.goto(base + "/app/shipments/SHP-1042", { waitUntil: "networkidle" });
+  await until(() => page.locator("[data-shipment-link]").count().then((n) => n === 3), "three seed shipments");
+  await page.locator("#review-plan").waitFor();
+  await page.locator("#ops-map canvas").waitFor();
+  pass("shipment page loads the dispatcher and interactive map without the hero");
   await page
     .locator("#operations")
     .evaluate((el) =>
@@ -267,19 +261,10 @@ async function main() {
   );
   pass("actual events advance position and enable rerouting");
   await page.locator("#cargo-search").fill("несуществующий груз");
-  assert.equal(await page.locator("[data-shipment]").count(), 0);
+  assert.equal(await page.locator("[data-shipment-link]").count(), 0);
   await page.locator("#cargo-search").fill("");
   pass("search empty state");
   await page.evaluate(() => scrollTo({ top: 0, behavior: "instant" }));
-  await until(
-    () =>
-      page
-        .locator("#hero-copy")
-        .evaluate(
-          (el) => !el.inert && Number(getComputedStyle(el).opacity) > 0.99,
-        ),
-    "return to hero",
-  );
   await page.locator("#start-demo").click();
   await until(() => page.locator("#demo-bar").isVisible(), "demo");
   await page.locator("#demo-pause").click();
@@ -312,20 +297,14 @@ async function main() {
   pass("responsive widths 375,390,768,1024,1440: no horizontal overflow");
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload({ waitUntil: "networkidle" });
-  await page.locator("#hero-map canvas").waitFor();
+  await page.locator("#ops-map canvas").waitFor();
   assert.equal(
     await page.evaluate(
       () => getComputedStyle(document.documentElement).scrollBehavior,
     ),
     "auto",
   );
-  assert.equal(
-    await page
-      .locator(".world-stage")
-      .evaluate((el) => getComputedStyle(el).position),
-    "relative",
-  );
-  pass("reduced motion uses static narrative and functional map");
+  pass("reduced motion preserves the functional dispatcher map");
   await page.locator("[data-open=sources-dialog]").first().click();
   assert.equal(await page.locator("#sources-dialog").isVisible(), true);
   await page.keyboard.press("Escape");
@@ -339,13 +318,13 @@ async function main() {
     };
   });
   fallback.on("pageerror", (e) => errors.push(e.message));
-  await fallback.goto(base, { waitUntil: "networkidle" });
-  assert.equal(await fallback.locator("[data-renderer=svg]").count(), 2);
+  await fallback.goto(base + "/app/shipments/SHP-1042", { waitUntil: "networkidle" });
+  assert.equal(await fallback.locator("[data-renderer=svg]").count(), 1);
   await fallback
-    .locator('#hero-map [role=button][aria-label="Махачкала"]')
+    .locator('#ops-map [role=button][aria-label="Махачкала"]')
     .click();
   assert.ok(
-    (await fallback.locator("#hero-readout").innerText()).includes("Махачкала"),
+    (await fallback.locator("#port-info").innerText()).includes("Махачкала"),
   );
   pass("WebGL unavailable: interactive SVG fallback");
   await fallback.close();
@@ -353,7 +332,7 @@ async function main() {
   await page.reload({ waitUntil: "networkidle" });
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.locator("#hero-copy").waitFor();
+  await page.locator("#operations").waitFor();
   await until(() => page.locator("#api-error").isVisible(), "offline status");
   pass("offline shell opens and does not pretend cargo data is fresh");
   await context.setOffline(false);

@@ -25,11 +25,11 @@
     <link rel="stylesheet" href="/static/freight-hero.css" />
     <script defer src="/static/vendor/gsap/gsap.min.js"></script>
     <script defer src="/static/vendor/gsap/ScrollTrigger.min.js"></script>
-    <script type="module" src="/static/command.js"></script>
+    <script type="module" src="/static/home.js"></script>
     <script type="module" src="/static/freight-hero.js"></script>
   </head>
   <body>
-    <a class="skip" href="#operations">К управлению перевозками</a>
+    <a class="skip" href="/app">К платформе</a>
     <header class="nav freight-nav">
       <a class="brand" href="#"
         ><img
@@ -44,12 +44,12 @@
       >
       <nav aria-label="Основная навигация">
         <a href="#journey">Как это работает</a
-        ><a href="#operations">Центр управления</a
+        ><a href="/app">Платформа</a
         ><button class="text-button" data-open="sources-dialog">
           Источники
         </button>
       </nav>
-      <a class="nav-cta" href="#operations">Открыть пульт <span>↗</span></a>
+      <a class="nav-cta" href="/app">Открыть платформу <span>↗</span></a>
     </header>
     <main>
       <section
@@ -92,8 +92,8 @@
               <span class="freight-scroll-cue" aria-hidden="true"
                 >ПРОКРУТИТЕ <b>↓</b></span
               >
-              <a href="#journey">К 3D-карте <span>↗</span></a>
-              <a href="#operations">Открыть пульт <span>↗</span></a>
+              <a href="#journey">К карте <span>↗</span></a>
+              <a href="/app">Открыть платформу <span>↗</span></a>
             </div>
             <div class="freight-strip-slot"></div>
           </div>
@@ -187,11 +187,11 @@
             <h2>Каспий.<br />Один коридор.<br /><em>Много решений.</em></h2>
             <p>Видеть риск до задержки.<br />Найти маршрут. Сохранить время.</p>
             <div class="hero-actions">
-              <a class="button primary" href="#operations"
+              <a class="button primary" href="/app"
                 >Управлять перевозками <span>↗</span></a
-              ><button class="button ghost" id="start-demo">
+              ><a class="button ghost" href="/app/shipments/SHP-1042?demo=1">
                 <span class="play-icon">▶</span> Демо · 90 секунд
-              </button>
+              </a>
             </div>
           </div>
           <div class="hero-caption">
@@ -211,12 +211,12 @@
               Одна задержка в порту становится цепочкой сорванных стыковок.
               Смотрите, кого она затронет.
             </p>
-            <a href="#operations" class="text-link"
+            <a href="/app" class="text-link"
               >Открыть сценарий в пульте ↗</a
             >
           </div>
           <div class="hero-bottom">
-            <a class="scroll-cue" href="#operations"
+            <a class="scroll-cue" href="/app"
               ><span>↓</span> ОТ КАРТЫ К РЕШЕНИЮ</a
             >
             <div class="chapter-dots" aria-label="Этапы истории">
@@ -243,6 +243,7 @@
           </p>
         </div>
       </section>
+      <!-- dispatcher:start -->
       <section class="operations" id="operations" aria-labelledby="ops-title">
         <div class="section-heading">
           <div>
@@ -255,19 +256,17 @@
             <span id="connection-status" class="connection" role="status"
               >Подключаем данные…</span
             ><button class="button compact" id="refresh">↻ Обновить</button
-            ><button class="button compact" data-open="create-dialog">
-              + Новый груз
-            </button>
+            >
           </div>
         </div>
         <div class="data-note">
-          <span class="dot mint"></span> Грузы и очереди — демо. Погода —
+          <span class="dot mint"></span> Источник погоды —
           <span id="weather-source">проверяем источник</span>.
           <button class="text-button" data-open="sources-dialog">
             Что стоит за цифрами ↗
           </button>
         </div>
-        <div class="metrics">
+        <div class="metrics" hidden>
           <div>
             <span>Грузы в работе</span><strong id="metric-count">—</strong
             ><small>в едином плане перевозок</small>
@@ -288,6 +287,9 @@
         </div>
         <div id="api-error" class="error-banner" role="alert" hidden></div>
         <div class="desk">
+          <label class="passport-mobile-switch">Перевозка
+            <select id="passport-mobile-select"></select>
+          </label>
           <aside class="cargo-list-panel">
             <div class="panel-title">
               <h3>Перевозки</h3>
@@ -317,7 +319,7 @@
           </aside>
           <div class="ops-map-panel">
             <div class="map-toolbar">
-              <span class="mono">КОРИДОР / 3D</span>
+              <span class="mono">КАРТА КОРИДОРА</span>
               <div class="scenario-toggle">
                 <button id="calm" class="active" aria-pressed="true">
                   Обычная погода</button
@@ -561,11 +563,12 @@
           </button>
         </div>
       </section>
+      <!-- dispatcher:end -->
       <section class="closing">
         <div class="eyebrow">SMART CASPIAN TRANSIT</div>
         <h2>Груз движется.<br /><span>Вы видите дальше.</span></h2>
-        <a class="button primary" href="#operations"
-          >Вернуться к перевозкам ↑</a
+        <a class="button primary" href="/app"
+          >Открыть платформу ↗</a
         >
         <div class="closing-route">
           <span>Москва</span><i></i><span>Каспий</span><i></i
@@ -586,6 +589,7 @@
         Источники и методология ↗
       </button>
     </footer>
+    <!-- dialogs:start -->
     <dialog id="sources-dialog">
       <div class="dialog-head">
         <h2>Откуда данные</h2>
@@ -707,8 +711,8 @@
           </button>
         </div>
         <p>
-          Если сервер защищён токеном, укажите ключ оператора. Он остаётся
-          только в памяти этой вкладки.
+          Если сервер защищён токеном, укажите ключ оператора. Ключ действует
+          в этой вкладке до её закрытия. Пустое поле удаляет ключ.
         </p>
         <label
           >Ключ оператора<input
@@ -760,5 +764,6 @@
       <div class="demo-track"><i id="demo-progress"></i></div>
     </div>
     <div class="toast" id="toast" role="status" hidden></div>
+    <!-- dialogs:end -->
   </body>
 </html>

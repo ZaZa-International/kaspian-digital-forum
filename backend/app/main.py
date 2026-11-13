@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import anchor, corridor, data, docking, graph, ml, ml_journal, model, operation_documents, operations, resilience, store, weather
+from app import anchor, corridor, data, docking, graph, ml, ml_journal, model, operation_documents, operations, resilience, store, weather, web, workspace
 
 # Demo write protection. Without SCT_WRITE_TOKEN writes are open (demo mode,
 # labelled in the UI); with it, POST endpoints require X-Write-Token.
@@ -125,6 +125,7 @@ app.include_router(operations.create_router(guard_write))
 app.include_router(ml_journal.create_router(guard_write))
 app.include_router(resilience.create_router())
 app.include_router(corridor.create_router(guard_write))
+app.include_router(workspace.create_router(guard_write))
 
 
 @app.get("/api/health")
@@ -728,6 +729,8 @@ def ml_shipment(
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+app.include_router(web.create_router(STATIC_DIR))
+
 
 @app.get("/sw.js")
 def service_worker():
@@ -737,10 +740,7 @@ def service_worker():
 
 @app.get("/")
 def index():
-    index_file = STATIC_DIR / "index.html"
-    if not index_file.exists():
-        raise HTTPException(404, "frontend not built yet")
-    return FileResponse(index_file)
+    return web.home(STATIC_DIR)
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ async function startServer() {
 }
 
 async function openPanel(page) {
-  await page.goto(base);
+  await page.goto(base + "/app/shipments/SHP-1042");
   await page.getByRole("tab", { name: "ML-прогноз" }).click();
   await page.locator(".intelligence-number").waitFor();
 }
@@ -100,7 +100,7 @@ async function openPanel(page) {
     const requested = page.waitForRequest(heldUrl);
     await page.getByRole("button", { name: "Сравнить сценарий" }).click();
     await requested;
-    await page.locator("[data-shipment=SHP-1043]").click();
+    await page.locator("[data-shipment-link=SHP-1043]").click();
     await page.locator(".intelligence-number").waitFor();
     release();
     assert.match(await page.locator("#intelligence-context").textContent(), /SHP-1043/);
@@ -142,7 +142,7 @@ async function openPanel(page) {
       const shipment = await shipmentResponse.json();
       const id = shipment.id || shipment.shipment?.id;
       await page.locator("#refresh").click();
-      await page.locator(`[data-shipment="${id}"]`).click();
+      await page.locator(`[data-shipment-link="${id}"]`).click();
       await page.locator(".intelligence-number").waitFor();
       const journal = page.locator("#intelligence-journal");
       if ((await journal.getAttribute("open")) === null) {

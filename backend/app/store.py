@@ -17,6 +17,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -170,10 +171,31 @@ CREATE TABLE IF NOT EXISTS corridor_receipts (
     PRIMARY KEY (shipment_id, sequence),
     UNIQUE (shipment_id, idempotency_key)
 );
+CREATE TABLE IF NOT EXISTS workspace_tasks (
+    id TEXT PRIMARY KEY,
+    shipment_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    due_at TEXT,
+    priority TEXT NOT NULL CHECK (priority IN ('normal', 'high', 'critical')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'done')),
+    note TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL CHECK (version >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    creation_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workspace_tasks_shipment ON workspace_tasks (shipment_id);
+CREATE TRIGGER IF NOT EXISTS remove_workspace_tasks_for_deleted_shipment
+    AFTER DELETE ON shipments BEGIN
+        DELETE FROM workspace_tasks WHERE shipment_id = OLD.id;
+    END;
 INSERT OR IGNORE INTO counters (name, value) VALUES ('shipment', 2000);
 """
 
 _migrate_lock = threading.Lock()
+_bootstrap_lock = threading.Lock()
 _migrated = False
 
 
@@ -192,11 +214,32 @@ def _connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=FULL")
-    conn.executescript(_SCHEMA)
-    _migrate_legacy_once()
-    return conn
+    try:
+        # A fresh database needs an exclusive lock to enter WAL. Two
+        # simultaneous first requests may otherwise get SQLITE_BUSY here
+        # before the ordinary busy timeout on their transaction applies.
+        with _bootstrap_lock:
+            _ensure_wal(conn)
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.executescript(_SCHEMA)
+            _migrate_legacy_once()
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    for attempt in range(6):
+        try:
+            if conn.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            return
+        except sqlite3.OperationalError as exc:
+            # Also allow another server process to finish its first connection.
+            if getattr(exc, "sqlite_errorcode", None) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 5:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def _migrate_legacy_once() -> None:
@@ -780,4 +823,5 @@ def reset_demo() -> dict:
         conn.execute("DELETE FROM operation_files")
         conn.execute("DELETE FROM ml_snapshots")
         conn.execute("DELETE FROM corridor_receipts")
+        conn.execute("DELETE FROM workspace_tasks")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

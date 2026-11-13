@@ -207,11 +207,15 @@ def _check_fields(fields: dict, shipment: dict, destination: str) -> list[dict]:
 
 def passport(conn, shipment: dict, remaining: list[dict], destination: str) -> dict:
     rows = conn.execute(
-        "SELECT metadata_json FROM operation_files WHERE shipment_id=? ORDER BY seq DESC",
+        "SELECT id,kind,metadata_json FROM operation_files WHERE shipment_id=? ORDER BY seq DESC",
         (shipment["id"],),
     )
-    files = [json.loads(row["metadata_json"]) for row in rows]
+    files = [
+        {**json.loads(row["metadata_json"]), "id": row["id"], "kind": row["kind"]}
+        for row in rows
+    ]
     for file in files:
+        file["fields"] = file.get("fields") or {}
         file["mismatches"] = _check_fields(file["fields"], shipment, destination)
     latest: dict = {}
     for file in files:
@@ -241,7 +245,7 @@ def passport(conn, shipment: dict, remaining: list[dict], destination: str) -> d
         source = "checklist"
         if file:
             fields, mismatches = file["fields"], file["mismatches"]
-            source = file["extraction_source"]
+            source = file.get("extraction_source") or "uploaded"
             comparable = {"shipment_id", "weight_t", "destination", "cargo"} & fields.keys()
             status = "mismatch" if mismatches else "matched" if comparable else "review_required"
         elif doc.get("status", seed.get(key)) == "verified":
