@@ -175,15 +175,137 @@ async function initMap() {
       .addTo(map).bindPopup(`<b>${esc(r.id)} · ${esc(r.name)}</b><br>${esc(r.via)}`);
   });
   const nodes = await getJSON("/api/nodes");
+  const ports = await getJSON("/api/ports").catch(() => ({ ports: [] }));
+  const cong = {};
+  ports.ports.forEach((p) => { cong[p.node] = p.congestion_pct; });
   nodes.nodes.forEach((n) => {
     nodeCache[n.id] = n;
-    L.circleMarker([n.lat, n.lon], { radius: 5, color: TOKENS["--color-ink"], fillColor: "#fff", fillOpacity: 1, weight: 2 })
-      .addTo(map).bindPopup(`<b>${esc(n.name)}</b> (${esc(n.country)})<br>${esc(n.kind)}${n.note ? "<br><span class='hint'>" + esc(n.note) + "</span>" : ""}`);
+    const c = cong[n.id];
+    const heat = c == null ? "#fff" : c >= 60 ? TOKENS["--color-danger"] : c >= 45 ? TOKENS["--color-signal"] : TOKENS["--color-ok"];
+    const m = L.circleMarker([n.lat, n.lon], { radius: c == null ? 5 : 6 + c / 22, color: TOKENS["--color-ink"], fillColor: heat, fillOpacity: c == null ? 1 : 0.85, weight: 2 })
+      .addTo(map).bindPopup(`<b>${esc(n.name)}</b> (${esc(n.country)})<br>${esc(n.kind)}${c != null ? `<br>загруженность ${c}%` : ""}${n.note ? "<br><span class='hint'>" + esc(n.note) + "</span>" : ""}`);
+    if (c != null) portMarkers[n.id] = m;
   });
   searchLayer = L.layerGroup().addTo(map);
+  stormLayer = L.polygon(CASPIAN_SEA, { color: TOKENS["--color-danger"], weight: 1.5, fillColor: TOKENS["--color-danger"], fillOpacity: 0.16, className: "storm-sea", interactive: false });
+  updateStormOverlay();
   // Fit the whole corridor on first load instead of a fixed viewport.
   const all = routes.routes.flatMap((r) => r.nodes.map((n) => [n.lat, n.lon]));
   if (all.length) map.fitBounds(L.latLngBounds(all).pad(0.06));
+  startVessel("R1");
+}
+
+/* Stylized Caspian sea outline for the storm overlay (schematic, not bathymetry). */
+const CASPIAN_SEA = [[47.0, 50.5], [46.0, 52.5], [44.0, 52.0], [42.0, 52.5], [40.0, 50.5], [38.0, 49.5], [37.0, 49.0], [39.0, 49.0], [41.0, 49.0], [43.0, 48.0], [45.0, 48.5], [47.0, 50.5]];
+let vesselMarker = null, vesselRAF = null, stormLayer = null;
+const portMarkers = {};
+
+function updateStormOverlay() {
+  if (!map || !stormLayer) return;
+  if (storm) { if (!map.hasLayer(stormLayer)) stormLayer.addTo(map); }
+  else if (map.hasLayer(stormLayer)) map.removeLayer(stormLayer);
+}
+
+/* Animated vessel travelling along a route (demo visualization, schematic). */
+function startVessel(routeId) {
+  if (!map || !polylines[routeId]) return;
+  if (vesselRAF) cancelAnimationFrame(vesselRAF);
+  if (vesselMarker) { map.removeLayer(vesselMarker); vesselMarker = null; }
+  const pts = polylines[routeId].getLatLngs();
+  const segs = []; let total = 0;
+  for (let i = 0; i < pts.length - 1; i++) { const d = pts[i].distanceTo(pts[i + 1]); segs.push(d); total += d; }
+  if (!total) return;
+  vesselMarker = L.marker(pts[0], { icon: L.divIcon({ className: "vessel-marker", html: icon("ship"), iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false, zIndexOffset: 1000 }).addTo(map);
+  const duration = 14000; let start = null;
+  const step = (ts) => {
+    if (!start) start = ts;
+    const t = ((ts - start) % duration) / duration;
+    let dist = t * total, i = 0;
+    while (i < segs.length && dist > segs[i]) { dist -= segs[i]; i++; }
+    if (i >= segs.length) i = segs.length - 1;
+    const a = pts[i], b = pts[i + 1] || pts[i];
+    const f = segs[i] ? dist / segs[i] : 0;
+    if (vesselMarker) vesselMarker.setLatLng([a.lat + (b.lat - a.lat) * f, a.lng + (b.lng - a.lng) * f]);
+    vesselRAF = requestAnimationFrame(step);
+  };
+  vesselRAF = requestAnimationFrame(step);
+}
+
+/* Radar comparison of routes across 5 normalized criteria (bigger = better). */
+function renderRadar(routes) {
+  const el = $("#radar-chart");
+  if (!el || !routes.length) return;
+  const axes = [
+    { key: "total_predicted_h", label: "Скорость" },
+    { key: "cost_usd", label: "Цена" },
+    { key: "co2_kg", label: "CO₂" },
+    { key: "delay_probability", label: "Надёжность" },
+    { key: "storm_price_h", label: "Штормостойкость" },
+  ];
+  const norm = routes.map((r) => axes.map((a) => {
+    const vals = routes.map((x) => x[a.key]);
+    const mn = Math.min(...vals), mx = Math.max(...vals);
+    const t = mx > mn ? (r[a.key] - mn) / (mx - mn) : 0.5;
+    return 1 - t; // all criteria: lower raw value = better
+  }));
+  const W = 340, H = 300, cx = W / 2, cy = H / 2 + 8, R = 100, n = axes.length;
+  const pt = (i, v) => { const ang = -Math.PI / 2 + i * 2 * Math.PI / n; return [cx + Math.cos(ang) * R * v, cy + Math.sin(ang) * R * v]; };
+  let grid = "";
+  [0.25, 0.5, 0.75, 1].forEach((g) => { grid += `<polygon points="${axes.map((_, i) => pt(i, g).join(",")).join(" ")}" fill="none" stroke="var(--color-line)"/>`; });
+  let spokes = "";
+  axes.forEach((a, i) => { const [x, y] = pt(i, 1); const [lx, ly] = pt(i, 1.2); spokes += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--color-line)"/><text x="${lx}" y="${ly}" font-size="10" fill="var(--color-ink-3)" text-anchor="middle">${a.label}</text>`; });
+  let polys = "";
+  routes.forEach((r, ri) => { const points = norm[ri].map((v, i) => pt(i, Math.max(0.06, v)).join(",")).join(" "); polys += `<polygon points="${points}" fill="${ROUTE_COLORS[r.route_id]}" fill-opacity="0.12" stroke="${ROUTE_COLORS[r.route_id]}" stroke-width="2"/>`; });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Радар сравнения маршрутов">${grid}${spokes}${polys}</svg>
+    <div class="radar-legend">${routes.map((r) => `<span class="radar-key"><i style="background:${ROUTE_COLORS[r.route_id]}"></i>${esc(r.route_id)}</span>`).join("")}</div>
+    <p class="hint">Чем дальше от центра — тем лучше по критерию (нормировано среди маршрутов).</p>`;
+}
+
+/* Live ETA countdown + leg progress for the digital twin. */
+let twinTimer = null;
+function renderTwinLive(s) {
+  const el = $("#twin-live");
+  if (!el) return;
+  if (twinTimer) clearInterval(twinTimer);
+  const legs = (s.forecast && s.forecast.legs) || [];
+  const total = legs.length || 1;
+  const done = s.current_leg || 0;
+  const pct = Math.min(100, Math.round(done / total * 100));
+  const eta = new Date(s.eta).getTime();
+  const tick = () => {
+    const ms = eta - Date.now();
+    let txt;
+    if (ms <= 0) txt = "прибыл";
+    else { const d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000), sec = Math.floor(ms % 60000 / 1000); txt = `${d}д ${h}ч ${m}м ${sec}с`; }
+    const cd = $("#eta-countdown");
+    if (cd) cd.textContent = txt;
+  };
+  el.innerHTML = `<div class="twin-live-row"><div class="twin-progress"><div class="twin-progress-bar" style="width:${pct}%"></div></div><span class="hint">плечо ${done}/${total}</span></div>
+    <div class="twin-eta">${icon("clock")}До ETA: <b id="eta-countdown" class="mono">…</b></div>`;
+  tick();
+  twinTimer = setInterval(tick, 1000);
+}
+
+/* "What to do now" recommendation synthesized from storm + exceptions. */
+function renderRecommendation(exceptions) {
+  const el = $("#recommendation");
+  if (!el) return;
+  const high = exceptions.filter((e) => e.severity === "high");
+  let title, body, chip;
+  if (storm) { title = "Шторм: переводите грузы на сухопутный R3"; body = "Паромы не выходят, пропуск рейса +48 ч. R3 через Баку не зависит от моря — цена шторма 0 ч."; chip = "rec-danger"; }
+  else if (high.length) { title = high[0].title; body = high[0].action; chip = "rec-warn"; }
+  else { title = "Все грузы в графике"; body = "Критических исключений нет. Поддерживайте текущие маршруты и следите за погодой на Каспии."; chip = "rec-ok"; }
+  el.innerHTML = `<div class="rec-card ${chip}">${icon("zap")}<div><b>${esc(title)}</b><p>${esc(body)}</p></div></div>`;
+}
+
+/* Live alert ticker (marquee of current exceptions). */
+function renderTicker(exceptions) {
+  const el = $("#alert-ticker");
+  if (!el) return;
+  if (!exceptions.length) { el.hidden = true; return; }
+  el.hidden = false;
+  const items = exceptions.map((e) => `<span class="ticker-item ${esc(e.severity)}">${icon("alert")}${esc(e.title)}</span>`).join("");
+  el.innerHTML = `<div class="ticker-track">${items}${items}</div>`;
 }
 
 /* Focus a route on the map + sync legend/table highlight (product interaction). */
@@ -191,6 +313,7 @@ function focusRoute(id) {
   if (!map || !polylines[id]) return;
   Object.entries(polylines).forEach(([rid, pl]) => pl.setStyle({ weight: rid === id ? 6 : 3, opacity: rid === id ? 1 : 0.4 }));
   map.fitBounds(polylines[id].getBounds().pad(0.2));
+  startVessel(id);
   document.querySelectorAll(".legend-item").forEach((el) => el.classList.toggle("focused", el.dataset.route === id));
   document.querySelectorAll("#compare-table tbody tr").forEach((tr) => tr.classList.toggle("focused", tr.dataset.route === id));
 }
@@ -223,6 +346,7 @@ function renderStormBtn() {
   b.innerHTML = `${icon("storm")}Шторм на Каспии<span class="storm-state">${storm ? "вкл" : "выкл"}</span>`;
   document.body.classList.toggle("storm-mode", storm);
   $("#storm-strip").hidden = !storm;
+  updateStormOverlay();
 }
 
 async function loadCompare() {
@@ -254,6 +378,7 @@ async function loadCompare() {
     el.addEventListener("click", () => focusRoute(el.dataset.route));
   });
   const best = data.routes.find((r) => r.route_id === data.best.co2);
+  renderRadar(data.routes);
   $("#kpi-co2").textContent = `${best.route_id}: ${(best.co2_kg / 1000).toFixed(1)} т`;
   const ports = await getJSON("/api/ports");
   const worst = ports.ports.reduce((a, b) => (a.congestion_pct > b.congestion_pct ? a : b));
@@ -296,6 +421,7 @@ async function loadShipment() {
   $("#shipment-info").innerHTML =
     `<b>${esc(s.id)} · ${esc(s.name)}</b> — ${esc(s.cargo)}, ${s.weight_t} т · ${esc(s.status)} · ETA ${esc(fmtDT(s.eta))}`;
   const nameOf = {};
+  renderTwinLive(s);
   (await getJSON("/api/nodes")).nodes.forEach((n) => (nameOf[n.id] = n.name));
   $("#timeline").innerHTML = s.forecast.legs.map((l) => `
     <li class="${l.id === s.forecast.bottleneck_leg_id ? "bottleneck" : ""}">
@@ -355,6 +481,8 @@ async function loadExceptions() {
     <li class="exc ${esc(e.severity)}">${icon("alert")}<div><b>${esc(e.title)}</b><br>
     ${esc(e.detail)}<br><span class="action">${icon("arrow-right")}${esc(e.action)}</span></div></li>`).join("")
     : `<li class="exceptions-empty">${icon("check-circle")}Исключений нет — все грузы в графике.</li>`;
+  renderRecommendation(data.exceptions);
+  renderTicker(data.exceptions);
 }
 
 async function initSearch() {
