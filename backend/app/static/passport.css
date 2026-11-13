@@ -1,0 +1,100 @@
+/* Shipment workspace: the current task owns the screen. */
+.passport-v2 .workspace-head { padding-bottom: 18px; }
+.passport-v2 .workspace-head h1 { font-size: clamp(24px, 3vw, 34px); }
+.passport-v2 .workspace-head-actions [data-open="create-dialog"] { display: none; }
+.passport-v2 .operations { padding: 0; }
+.passport-v2 .operations > .section-heading,
+.passport-v2 .cargo-list-panel,
+.passport-v2 .passport-mobile-switch,
+.passport-v2 .detail-top > div:first-child { display: none; }
+.passport-v2 .data-note { padding: 8px 0 16px; margin: 0; border: 0; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.passport-v2 .workspace-detail { margin: 0; border: 0; background: transparent; }
+.passport-v2 .detail-top { padding: 0; border: 0; margin-bottom: 18px; display: block; }
+.passport-v2 .detail-tabs { display: flex; width: 100%; padding: 0; background: transparent; border-bottom: 1px solid var(--line); gap: 22px; overflow-x: auto; white-space: nowrap; }
+.passport-v2 .detail-tabs button { padding: 12px 2px; min-height: 44px; font: 500 14px var(--font); border-radius: 0; background: transparent; color: var(--muted); border: 0; border-bottom: 2px solid transparent; flex: 0 0 auto; }
+.passport-v2 .detail-tabs button[aria-selected="true"] { border-color: #254fe1; color: #254fe1; background: transparent; }
+.passport-v2 .operations .desk { display: grid; grid-template-columns: minmax(0, 1fr) 310px; align-items: start; gap: 18px; border: 0; background: transparent; margin: 0 0 22px; }
+.passport-v2 .ops-map-panel { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; overflow: hidden; position: relative; }
+.passport-v2 .workspace-main .operations .ops-map-panel, .passport-v2 .workspace-main .decision-panel { grid-row: auto; }
+.passport-v2 .map-toolbar { padding: 10px 14px; min-height: 54px; gap: 10px; background: #fff; color: #182838; }
+.passport-v2 .scenario-toggle { border: 1px solid #dce1e8; background: #f6f7fa; padding: 3px; border-radius: 7px; }
+.passport-v2 .scenario-toggle button { color: #526170; min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.passport-v2 .scenario-toggle button.active { background: #fff; color: #254fe1; box-shadow: 0 1px 4px #17213215; }
+.passport-v2 .ops-map { height: 390px; min-height: 300px; flex: none; }
+.passport-v2 .passport-simulation { padding: 12px 16px; border-top: 1px solid var(--line); color: #536374; font-size: 12px; }
+.passport-v2 .passport-simulation summary { cursor: pointer; min-height: 24px; }
+.passport-v2 .horizon { padding: 16px 0 0; background: #fff; border: 0; }
+.passport-v2 .horizon p { color: #536374; }
+.passport-v2 .port-info { position: absolute; z-index: 8; top: 110px; left: 16px; right: 16px; background: #fff; color: #172638; border: 1px solid #dbe2ea; border-radius: 8px; box-shadow: 0 6px 24px #15283b17; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; }
+.passport-v2 .port-info strong,.passport-v2 .port-info span { display: block; }
+.passport-v2 .port-info span { font-size: 12px; color: #536374; }
+.passport-v2 .port-info button { min-width: 40px; min-height: 40px; font-size: 24px; }
+.passport-v2 .decision-panel { grid-column: auto; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.passport-v2 .decision-panel .panel-title { display: none; }
+.passport-v2 .decision-panel #decision-content { display: block; padding: 0; }
+.passport-v2 .passport-label { display: block; font-size: 12px; color: #647283; margin-bottom: 4px; }
+.passport-v2 .passport-position strong { display: block; font-size: 18px; font-weight: 600; }
+.passport-v2 .passport-position p { font-size: 13px; margin-top: 4px; color: #647283; }
+.passport-v2 .decision-eta { margin: 16px 0; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.passport-v2 .decision-eta strong { font-size: 25px; margin: 4px 0; font-weight: 600; }
+.passport-v2 .decision-eta small { font-size: 12px; color: #536374; }
+.passport-v2 .decision-eta .late { color: #ad481c; }
+.passport-v2 .passport-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 18px; }
+.passport-v2 .passport-facts span { display: block; font-size: 11px; color: #647283; }
+.passport-v2 .passport-facts strong { display: block; font-size: 14px; margin-top: 5px; font-variant-numeric: tabular-nums; }
+.passport-v2 .recommendation { border: 0; background: #f2f5fe; border-radius: 8px; padding: 16px; margin: 0; }
+.passport-v2 .recommendation .eyebrow { color: #526179; font: 500 10px var(--mono); letter-spacing: .06em; }
+.passport-v2 .recommendation h4 { font-size: 18px; color: #172638; margin: 8px 0 10px; }
+.passport-v2 .recommendation > p { font-size: 12px; }
+.passport-v2 .recommendation .button { width: 100%; font-size: 13px; min-height: 44px; margin: 12px 0 0; }
+.passport-v2 .delta-grid { gap: 12px; margin: 10px 0; }
+.passport-v2 .delta-grid strong { color: #254fe1; font-size: 19px; }
+.passport-v2 .delta-grid span { color: #536374; font-size: 11px; }
+.passport-v2 .decision-footnote,.passport-v2 .passport-conditional { line-height: 1.5; color: #526170; margin-top: 10px; }
+.passport-v2 .decision-shortcuts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.passport-v2 .decision-shortcuts button { font-size: 12px; padding: 8px 0; background: transparent; color: #254fe1; }
+.passport-v2 .tab-view { padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.passport-v2 #view-plan { background: transparent; padding: 0; border: 0; }
+.passport-v2 .plan-layout { grid-template-columns: minmax(0,1fr) 310px; align-items: start; gap: 18px; }
+.passport-v2 .proposal-option.button > span { font-size: 13px; line-height: 1.5; }
+.passport-v2 .proposal-option.button { width: 100%; justify-content: space-between; gap: 12px; margin-bottom: 8px; text-align: left; }
+.passport-v2 .proposal-option small { display: block; font-size: 12px; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.passport-v2 .proposal-priority { display: block; color: #536477; font-size: 12px; margin-bottom: 14px; }
+.passport-v2 .proposal-priority select { width: 100%; min-height: 44px; margin-top: 6px; }
+.passport-v2 .proposal-more summary { cursor: pointer; color: #254fe1; padding: 12px 0; min-height: 44px; }
+.passport-v2 .proposal-option.button.primary { background: #edf2ff; color: #254fe1; border-color: #bdcdff; }
+.passport-v2 .upload-box { background: #f6f8fc; border-color: #b7c5d8; border-radius: 9px; }
+.passport-v2 .upload-box h4 { color: #182838; }
+.passport-v2 .plan-legs,.passport-v2 .plan-caption { padding: 20px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.passport-v2 .plan-leg { min-height: 82px; }
+.passport-v2 .leg-place { background: transparent; color: #172638; font-weight: 500; padding: 0; text-align: left; min-height: 40px; }
+.passport-v2 .leg-place span { color: #254fe1; }
+.passport-v2 .leg-place:hover { color: #254fe1; }
+.passport-v2 .plan-leg p { font-size: 12px; }
+.passport-v2 .plan-leg.current .leg-index { background: #254fe1; color: #fff; }
+.passport-v2 .plan-leg.done .leg-index { background: #e5f1eb; color: #226443; }
+.passport-v2 .passport-history { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 16px; }
+.passport-v2 .passport-history summary { cursor: pointer; font-size: 14px; font-weight: 500; }
+.passport-v2 .version-list { margin-top: 12px; }
+.passport-v2 .advanced-row { margin-top: 20px; padding: 15px 0; font-size: 12px; }
+.passport-v2 .operations .form-note { font-size: 12px; }
+.passport-v2 .operations .form-grid input,.passport-v2 .operations .form-grid select { min-height: 44px; }
+.passport-v2 .ops-map .caspian-label { color: #fff; }
+@media (max-width: 1150px) {
+  .passport-v2 .operations .desk,.passport-v2 .plan-layout { grid-template-columns: minmax(0,1fr) 280px; }
+}
+@media (max-width: 900px) {
+  .passport-v2 .operations .desk,.passport-v2 .plan-layout { grid-template-columns: minmax(0,1fr); }
+  .passport-v2 .decision-panel { grid-row: auto; padding: 16px; }
+  .passport-v2 .ops-map { height: 340px; }
+  .passport-v2 .workspace-head { padding-bottom: 10px; }
+  .passport-v2 .data-note { font-size: 11px; padding-bottom: 10px; }
+  .passport-v2 .detail-tabs { gap: 18px; }
+  .passport-v2 .detail-tabs button { font-size: 13px; }
+  .passport-v2 .map-toolbar { flex-wrap: wrap; }
+  .passport-v2 .tab-view { padding: 16px; }
+  .passport-v2 .decision-eta strong { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .passport-v2 *, .passport-v2 *::before { scroll-behavior: auto !important; }
+}

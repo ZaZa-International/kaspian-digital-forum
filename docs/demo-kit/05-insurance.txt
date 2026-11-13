@@ -1,0 +1,7 @@
+СИНТЕТИЧЕСКИЙ ПРИМЕР. СТРАХОВОЕ ПОКРЫТИЕ НЕ ПРЕДОСТАВЛЯЕТСЯ.
+Вид: Страховой полис
+Document number: DEMO-INSURANCE-1042
+Shipment ID: SHP-1042
+Weight: 48 t
+Destination: Bandar Abbas
+Cargo: 2 × 40ft, бытовая техника

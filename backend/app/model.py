@@ -42,7 +42,9 @@ def _sea_weather(leg: dict, storm: bool, scenario: dict) -> dict:
     """Single precedence rule for ALL endpoints and Monte Carlo:
     explicit scenario wave/wind > storm preset > live/fallback weather.
     Unspecified components keep the base value (wind-only works too)."""
-    base = _weather(leg["sea"], storm)
+    base = scenario.get("sea_state")
+    if base is None:
+        base = _weather(leg["sea"], storm)
     wave = scenario.get("wave_m")
     wind = scenario.get("wind_ms")
     if wave is None and wind is None:
@@ -117,7 +119,9 @@ def predict_leg(leg: dict, storm: bool, scenario: dict | None = None) -> dict:
     if cong is None:
         pid = leg.get("port") or ""
         cong = data.get_port(pid)["congestion_pct"] if pid in data.PORTS else 0
-    customs = leg.get("customs_h", 0) + scenario.get("customs_extra_h", 0)
+    customs = scenario.get("leg_customs_h", leg.get("customs_h", 0)) + scenario.get(
+        "customs_extra_h", 0
+    )
     if mode == "sea":
         w = _sea_weather(leg, storm, scenario)
         wave, wind = w["wave_m"], w["wind_ms"]
@@ -136,6 +140,10 @@ def predict_leg(leg: dict, storm: bool, scenario: dict | None = None) -> dict:
         **leg,
         "predicted_h": round(leg["base_h"] + wait_h + delay, 1),
         "wait_h": wait_h,
+        "idle_h": round(
+            wait_h + customs + (cong * 0.12 if cong >= 60 else 0)
+            + (48 if mode == "sea" and wave >= 2 else 0), 1
+        ),
         "delay_h": delay,
         "reasons": reasons,
         "risk": "high" if delay >= 12 else "medium" if delay >= 5 else "low",
@@ -688,52 +696,38 @@ EVENT_RU = {
     "customs_done": "Таможня: завершено",
     "delay": "Задержка",
     "note": "Событие",
+    "route_plan_accepted": "Принят новый план",
 }
 
 
-def _seed_demo_events(shipment: dict) -> None:
-    """Demo actual-event log for seed shipments (labelled simulation, NOT telemetry)."""
+def demo_events(shipment: dict) -> list[dict]:
+    """Deterministic events for the seed shipment's illustrated progress."""
     if shipment["id"] not in {s["id"] for s in data.SHIPMENTS}:
-        return
-    if store.list_events(shipment["id"]):
-        return
+        return []
     route = data.get_route(shipment["route_id"])
     try:
         eta = datetime.fromisoformat(shipment["eta"])
     except ValueError:
-        return
-    t = eta - timedelta(hours=sum(l["base_h"] for l in route["legs"]))
-    for i, leg in enumerate(route["legs"]):
-        if i > shipment["current_leg"]:
-            break
-        store.add_event(
-            shipment_id=shipment["id"],
-            event_type="departure",
-            leg_id=leg["id"],
-            planned_ts=t.isoformat(),
-            actual_ts=t.isoformat(),
-            occurred_ts=t.isoformat(),
-            source="demo-simulation",
-            location=data.NODES[leg["from"]]["name"],
-            mode=leg["mode"],
-            confidence="demo",
-            note="Демо-симуляция, не GPS/AIS/телематрия",
-        )
-        t += timedelta(hours=leg["base_h"])
-        if i < shipment["current_leg"]:
-            store.add_event(
-                shipment_id=shipment["id"],
-                event_type="arrival",
-                leg_id=leg["id"],
-                planned_ts=t.isoformat(),
-                actual_ts=t.isoformat(),
-                occurred_ts=t.isoformat(),
-                source="demo-simulation",
-                location=data.NODES[leg["to"]]["name"],
-                mode=leg["mode"],
-                confidence="demo",
-                note="Демо-симуляция, не GPS/AIS/телематрия",
-            )
+        return []
+    t = eta.replace(tzinfo=timezone.utc) - timedelta(hours=30 + sum(l["base_h"] for l in route["legs"]))
+    progress_count = shipment["current_leg"]
+    events = []
+    for i, leg in enumerate(route["legs"][:progress_count + bool(shipment.get("demo_in_transit"))]):
+        arrival = t + timedelta(hours=leg["base_h"])
+        steps = [("departure", "from", t)]
+        if i < progress_count:
+            steps.append(("arrival", "to", arrival))
+        for kind, endpoint, at in steps:
+            events.append({
+                "id": f"demo:{shipment['id']}:{leg['id']}:{kind}", "shipment_id": shipment["id"],
+                "event_type": kind, "leg_id": leg["id"], "planned_ts": at.isoformat(),
+                "actual_ts": at.isoformat(), "occurred_ts": at.isoformat(), "received_ts": at.isoformat(),
+                "source": "demo-simulation", "location": data.NODES[leg[endpoint]]["name"],
+                "mode": leg["mode"], "confidence": "demo", "note": "Демонстрационное событие",
+                "correction_of": None, "delay_h": None,
+            })
+        t = arrival
+    return events
 
 
 def add_shipment_event(shipment_id: str, **fields) -> dict:
@@ -747,7 +741,6 @@ def shipment_timeline(
 ) -> dict:
     route = data.get_route(shipment["route_id"])
     fc = forecast_route(route, shipment["weight_t"], storm, scenario)
-    _seed_demo_events(shipment)
     try:
         eta = datetime.fromisoformat(shipment["eta"])
     except ValueError:
@@ -840,7 +833,9 @@ def shipment_timeline(
             "title": f"{EVENT_RU.get(ev['event_type'], ev['event_type'])} (факт)",
             "time": ev["occurred_ts"] or ev["received_ts"],
         }
-        for ev in store.list_events(shipment["id"])
+        for ev in [*demo_events(shipment), *(
+            event for event in store.list_events(shipment["id"]) if event["source"] != "demo-simulation"
+        )]
     ]
     return {
         "shipment_id": shipment["id"],

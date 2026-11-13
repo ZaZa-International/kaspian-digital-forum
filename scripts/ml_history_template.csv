@@ -1,4 +1,4 @@
-max_wave_m,max_wind_ms,max_congestion_pct,total_customs_h,sea_km,rail_km,weight_t,sea_legs,delay_h,departed_at
-0.7,9,45,16,930,3120,48,1,18.5,2026-09-01T06:00:00+00:00
-1.4,12,62,21,930,3120,96,1,41.0,2026-09-03T10:00:00+00:00
-0.0,0,55,13,0,4000,48,0,12.0,2026-09-05T08:00:00+00:00
+max_wave_m,max_wind_ms,max_congestion_pct,total_customs_h,sea_km,rail_km,weight_t,sea_legs,delay_h,forecast_at,observed_at,shipment_id
+0.7,9,45,16,930,3120,48,1,18.5,2026-09-01T06:00:00+00:00,2026-09-05T13:45:00+00:00,example-001
+1.4,12,62,21,930,3120,96,1,41.0,2026-09-03T10:00:00+00:00,2026-09-09T11:20:00+00:00,example-002
+0.0,0,55,13,0,4000,48,0,12.0,2026-09-05T08:00:00+00:00,2026-09-10T19:00:00+00:00,example-003

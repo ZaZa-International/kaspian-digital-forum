@@ -1,0 +1,7 @@
+СИНТЕТИЧЕСКИЙ ПРИМЕР. НЕ СЧЁТ И НЕ ТАМОЖЕННЫЙ ДОКУМЕНТ.
+Вид: Счёт-фактура с исправленной массой
+Document number: DEMO-INVOICE-1042-CORRECT
+Shipment ID: SHP-1042
+Weight: 48 t
+Destination: Bandar Abbas
+Cargo: 2 × 40ft, бытовая техника

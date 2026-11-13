@@ -398,6 +398,22 @@ GRAPH_EDGES += [
         "port": "makhachkala",
         "customs_h": 0,
     },
+    {
+        "id": "G-MAH-BAK",
+        "mode": "road",
+        "from": "makhachkala",
+        "to": "baku",
+        "distance_km": 410,
+        "base_h": 11,
+        "port": None,
+        "customs_h": 8,
+        "source": "Минтранс России · МАПП Яраг-Казмаляр",
+        "source_url": "https://mintrans.gov.ru/eye/press-center/news/11068",
+        "note": (
+            "Автомобильное плечо через Яраг-Казмаляр — Самур. "
+            "Расстояние, время в пути и очередь — модельные оценки."
+        ),
+    },
     # Enzeli (case-listed port) connected via conditional ferry + rail to Tehran.
     {
         "id": "G-MAH-ENZ",
@@ -443,7 +459,7 @@ SHIPMENTS = [
         "weight_t": 48,
         "route_id": "R1",
         "current_leg": 1,
-        "status": "в пути",
+        "status": "ожидание в узле",
         "eta": "2026-11-16 14:00",
         "docs": {
             "invoice": "verified",
@@ -477,6 +493,7 @@ SHIPMENTS = [
         "route_id": "R3",
         "current_leg": 1,
         "status": "в пути",
+        "demo_in_transit": True,
         "eta": "2026-11-15 20:00",
         "docs": {
             "invoice": "verified",

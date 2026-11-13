@@ -92,7 +92,8 @@ def test_live_weather_and_corridor():
 
 def test_ml_info_and_forecast():
     info = client.get("/api/ml/info").json()
-    assert info["n_train"] == 640 and info["n_test"] == 160
+    assert sum(info[key] for key in ("n_train", "n_validation", "n_calibration", "n_test")) == info["dataset"]["n"]
+    assert info["n_test"] > 0 and info["n_calibration"] > 0
     assert info["metrics"]["random_forest"]["r2"] > 0.6
     assert info["metrics"]["random_forest"]["mae_h"] < 6
     calm = client.get("/api/ml/forecast?route_id=R1&weight_t=48").json()
@@ -169,8 +170,8 @@ def test_ml_ensemble_and_attribution():
     assert "ensemble_rf_hgb" in info["metrics"]
     assert info["metrics"]["ensemble_rf_hgb"]["r2"] > 0.6
     fc = client.get("/api/ml/forecast?route_id=R1&weight_t=48").json()
-    assert "ensemble_delay_h" not in fc  # ml_delay_h IS the ensemble
-    assert fc["ml_model"].startswith("Ensemble")
+    assert "ensemble_delay_h" not in fc
+    assert fc["selected_model"] == info["selected_model"]
     assert fc["rf_delay_h"] >= 0 and fc["hgb_delay_h"] >= 0
     assert len(fc["local_attribution"]) == 3
     assert all("contribution_h" in a for a in fc["local_attribution"])

@@ -30,6 +30,23 @@ def _adjacency(closed: frozenset[str]) -> dict[str, list[dict]]:
     return adj
 
 
+def available_paths(start: str, goal: str, excluded: set[str]):
+    """Loopless continuations in the finite corridor graph."""
+    if start in excluded or goal in excluded:
+        return
+    adjacency = _adjacency(frozenset(excluded))
+
+    def walk(node, visited, path):
+        if node == goal:
+            yield path
+            return
+        for edge in adjacency.get(node, ()):
+            if edge["to"] not in visited:
+                yield from walk(edge["to"], visited | {edge["to"]}, [*path, edge])
+
+    yield from walk(start, {start}, [])
+
+
 def _dijkstra(
     adj: dict, start: str, goal: str, cost_fn
 ) -> tuple[list[dict] | None, float]:

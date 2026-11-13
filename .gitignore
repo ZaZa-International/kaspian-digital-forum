@@ -6,3 +6,6 @@ __pycache__/
 backend/app/data/
 .~lock.*#
 .playwright-mcp/
+
+node_modules/
+artifacts/qa/

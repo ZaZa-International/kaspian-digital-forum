@@ -64,9 +64,11 @@ def test_search_honors_extra_customs():
 
 
 def test_search_honors_wave_and_compare_too():
-    a = client.get("/api/routes/search").json()["paths"]
-    b = client.get("/api/routes/search?wave_m=3").json()["paths"]
-    assert max(p["delay_h"] for p in b) > max(p["delay_h"] for p in a)
+    sea_crossing = "/api/routes/search?from_node=makhachkala&to_node=amirabad"
+    a = client.get(sea_crossing).json()["paths"]
+    b = client.get(sea_crossing + "&wave_m=3").json()["paths"]
+    assert a[0]["path_id"] == b[0]["path_id"]
+    assert b[0]["delay_h"] > a[0]["delay_h"]
     ca = client.get("/api/compare").json()["routes"]
     cb = client.get("/api/compare?wave_m=3&wind_ms=20").json()["routes"]
     r1a = next(r for r in ca if r["route_id"] == "R1")

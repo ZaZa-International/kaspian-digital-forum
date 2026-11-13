@@ -1,0 +1,7 @@
+СИНТЕТИЧЕСКИЙ ПРИМЕР. НЕ СЕРТИФИКАТ ПРОИСХОЖДЕНИЯ.
+Вид: Сертификат происхождения
+Document number: DEMO-ORIGIN-1042
+Shipment ID: SHP-1042
+Weight: 48 t
+Destination: Bandar Abbas
+Cargo: 2 × 40ft, бытовая техника

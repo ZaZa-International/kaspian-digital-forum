@@ -1,0 +1,362 @@
+@font-face {
+  font-family: Oswald;
+  src: url("/static/assets/freight/oswald.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+}
+
+.freight-nav {
+  color: #151515;
+  background: #fff;
+  border-color: #e2e2e2;
+}
+.freight-nav .brand-dot,
+.freight-nav nav a:hover,
+.freight-nav .text-button:hover {
+  color: #254fe1;
+}
+.freight-nav .brand small,
+.freight-nav .text-button {
+  color: #505050;
+}
+.freight-nav .nav-cta {
+  border-color: #1d1d1d;
+}
+.freight-nav .nav-cta:hover {
+  background: #151515;
+  color: #fff;
+}
+.freight-nav :focus-visible,
+.freight-track :focus-visible {
+  outline-color: #2f63ff;
+}
+
+.freight-track {
+  position: relative;
+  background: #fff;
+}
+.freight-scene {
+  position: relative;
+  height: 100lvh;
+  min-height: 560px;
+  isolation: isolate;
+  overflow: clip;
+  background: #fff;
+}
+.freight-track.is-scrubbed .freight-scene {
+  height: 100lvh;
+  position: sticky;
+  top: 0;
+}
+.freight-media {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #fff;
+}
+.freight-frame {
+  position: absolute;
+  top: var(--freight-frame-y, 50%);
+  left: var(--freight-frame-x, 50%);
+  width: var(--freight-frame-width, 100%);
+  height: var(--freight-frame-height, 100%);
+  max-width: none;
+  transform: translate(-50%, -50%);
+  object-fit: cover;
+}
+.freight-video {
+  visibility: hidden;
+}
+.freight-track.has-video .freight-video {
+  visibility: visible;
+}
+.freight-letter-window {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--freight-edge, 82.9%);
+  overflow: hidden;
+  mix-blend-mode: darken;
+  pointer-events: none;
+}
+.freight-letters {
+  position: absolute;
+  bottom: 4%;
+  left: 0;
+  color: #e9e9e9;
+  font:
+    700 clamp(150px, 34vw, 560px) / 0.95 Oswald,
+    Impact,
+    sans-serif;
+  letter-spacing: -0.065em;
+  white-space: nowrap;
+  transform: translate3d(var(--freight-letters-x, 100vw), 0, 0);
+}
+.freight-floor {
+  position: absolute;
+  inset: var(--freight-edge, 82.9%) 0 0;
+  display: flex;
+  flex-direction: column;
+  background: #111;
+  color: #fff;
+  overflow: hidden;
+}
+.freight-scene-links {
+  display: flex;
+  align-items: center;
+  gap: clamp(12px, 2.2vw, 34px);
+  min-height: 62px;
+  margin-top: auto;
+  padding: 0 max(24px, 4vw);
+  font: 12px / 1.3 var(--mono);
+}
+.freight-scene-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+.freight-scene-links a:last-child {
+  color: #aebfff;
+}
+.freight-scene-links a:hover {
+  text-decoration: underline;
+}
+.freight-stage-label {
+  margin-right: auto;
+  color: #c2c2c2;
+}
+.freight-scroll-cue {
+  display: none;
+  color: #c2c2c2;
+}
+.freight-scroll-cue b {
+  margin-left: 8px;
+  color: #fff;
+  font-size: 16px;
+}
+.freight-track.is-scrubbed .freight-scroll-cue {
+  display: inline;
+}
+.freight-strip-slot:not(:empty) {
+  position: absolute;
+  inset: 0 0 62px;
+}
+.freight-services {
+  background: #111;
+  color: #fff;
+  --freight-pad: max(24px, 4vw);
+  padding: clamp(32px, 5vw, 76px) var(--freight-pad);
+}
+.freight-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+.freight-lead {
+  grid-column: 1 / -1;
+  margin-bottom: 16px;
+}
+.freight-lead h1 {
+  margin: 0 0 14px;
+  font:
+    700 clamp(36px, 5.5vw, 84px) / 1.04 Oswald,
+    Impact,
+    sans-serif;
+  letter-spacing: -0.024em;
+  text-transform: uppercase;
+}
+.freight-lead h1 span,
+.freight-lead em {
+  display: block;
+}
+.freight-lead em {
+  font-style: normal;
+  color: #7394ff;
+}
+.freight-lead p,
+.freight-card p {
+  color: #d1d1d1;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.freight-lead p {
+  max-width: 33ch;
+}
+.freight-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 205px;
+  padding: 19px 22px;
+  border: 1px solid #777;
+}
+.freight-card svg {
+  width: 31px;
+  height: 31px;
+  flex: none;
+  margin-bottom: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.freight-card h2 {
+  margin: 0 0 9px;
+  font:
+    600 24px / 1.12 Oswald,
+    Impact,
+    sans-serif;
+  text-transform: uppercase;
+}
+.freight-strip-slot .freight-services {
+  height: 100%;
+  padding: 0;
+  overflow: clip;
+}
+.freight-strip-slot .freight-strip {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  height: 100%;
+  gap: clamp(15px, 2vw, 27px);
+  transform: translate3d(var(--freight-strip-x, 100vw), 0, 0);
+}
+.freight-strip-slot .freight-lead {
+  margin: 0 15px 0 0;
+  width: clamp(310px, 36vw, 530px);
+}
+.freight-strip-slot .freight-lead h1 {
+  font-size: clamp(34px, min(4.7vw, 7.6lvh), 72px);
+  white-space: nowrap;
+}
+.freight-strip-slot .freight-card {
+  width: clamp(192px, 21vw, 304px);
+  min-height: min(224px, 34lvh);
+  border-width: 0 0 0 1px;
+  border-color: #ffffff26;
+}
+.freight-strip-slot .freight-card:last-child {
+  margin-right: var(--freight-pad);
+}
+
+.atlas-section.journey {
+  height: auto;
+  min-height: 0;
+  scroll-margin-top: -70px;
+}
+.atlas-section .world-stage {
+  position: relative;
+  height: clamp(660px, 85svh, 800px);
+  min-height: 0;
+}
+.atlas-section .hero-topline {
+  top: 44px;
+}
+.atlas-section .hero-copy h2 {
+  font-size: clamp(45px, 5.2vw, 80px);
+  line-height: 0.99;
+  letter-spacing: -0.055em;
+  font-weight: 400;
+}
+.atlas-section .hero-copy h2 em {
+  color: var(--mint);
+  font-size: 0.8em;
+  font-style: normal;
+}
+.atlas-section .chapter-dots {
+  display: none;
+}
+
+@media (max-width: 800px) {
+  .freight-scene {
+    height: 76lvh;
+    min-height: 520px;
+  }
+  .freight-track {
+    --freight-edge: calc(36% + 33.2vw);
+  }
+  .freight-frame {
+    width: var(--freight-frame-width, 155%);
+    height: var(--freight-frame-height, auto);
+    top: var(--freight-frame-y, calc(36% + 4.5vw));
+  }
+  .freight-scene-links {
+    flex-wrap: wrap;
+    column-gap: 22px;
+    row-gap: 0;
+    padding-block: 10px;
+  }
+  .freight-stage-label {
+    width: 100%;
+    font-size: 9px;
+  }
+  .freight-track.is-scrubbed .freight-scroll-cue {
+    display: none;
+  }
+  .freight-lead h1 {
+    font-size: clamp(40px, 10vw, 72px);
+  }
+  .freight-card {
+    min-height: 172px;
+  }
+  .atlas-section .world-stage {
+    height: 900px;
+  }
+  .atlas-section .hero-copy {
+    top: 100px;
+  }
+  .atlas-section .hero-map {
+    top: 410px;
+    bottom: 95px;
+    min-height: 0;
+  }
+  .freight-track.is-scrubbed .freight-scene-links {
+    margin-top: 0;
+  }
+  .freight-track.is-scrubbed .freight-floor {
+    justify-content: flex-end;
+    padding-bottom: 36px;
+  }
+}
+@media (max-height: 650px) and (min-width: 801px) {
+  .freight-strip-slot .freight-card {
+    min-height: 0;
+    padding: 14px;
+  }
+  .freight-strip-slot .freight-card h2 {
+    font-size: 21px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .freight-scene {
+    height: 76lvh;
+  }
+  .freight-letters {
+    display: none;
+  }
+}
+.freight-mobile-lead-slot:empty {
+  display: none;
+}
+.freight-mobile-lead-slot .freight-lead {
+  margin: 0;
+  padding: 22px 24px 12px;
+}
+.freight-mobile-lead-slot .freight-lead h1 {
+  font-size: clamp(32px, 8.7vw, 38px);
+  line-height: 1.06;
+  margin-bottom: 12px;
+}
+.freight-mobile-lead-slot .freight-lead p {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 39ch;
+}
+@media (max-width: 800px) {
+  .atlas-section .hero-map {
+    bottom: 135px;
+  }
+}

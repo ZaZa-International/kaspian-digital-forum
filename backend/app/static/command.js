@@ -1,0 +1,1086 @@
+import { calculateRouteProgress } from "./route-progress.js";
+import { createIntelligencePanel } from "./intelligence-panel.js";
+import { createResiliencePanel } from "./resilience-panel.js";
+import { createCorridorPanel } from "./corridor-panel.js";
+
+const $ = (s, root = document) => root.querySelector(s);
+const $$ = (s, root = document) => [...root.querySelectorAll(s)];
+const esc = (v) =>
+  String(v ?? "").replace(
+    /[&<>"']/g,
+    (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        c
+      ],
+  );
+const num = (v, digits = 0) =>
+  v != null && v !== "" && Number.isFinite(Number(v))
+    ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: digits }).format(
+        Number(v),
+      )
+    : "—";
+const money = (v) => (v == null ? "—" : "$" + num(v));
+const when = (v) => {
+  if (!v) return "—";
+  const d = new Date(v);
+  return Number.isNaN(d.valueOf())
+    ? "—"
+    : d.toLocaleString("ru-RU", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+};
+const localInput = (v) => {
+  if (!v) return "";
+  const d = new Date(v);
+  if (Number.isNaN(d.valueOf())) return "";
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+    .toISOString()
+    .slice(0, 16);
+};
+const modes = {
+  rail: "Железная дорога",
+  sea: "Морское плечо",
+  road: "Автодорога",
+};
+const eventNames = {
+  departure: "Отправление",
+  arrival: "Прибытие",
+  gate_in: "Вход на терминал",
+  gate_out: "Выход с терминала",
+  load: "Погрузка",
+  discharge: "Разгрузка",
+  customs_start: "Проверка документов",
+  customs_done: "Документы проверены",
+  delay: "Задержка",
+  note: "Заметка",
+  plan_accepted: "План принят",
+  route_plan_accepted: "План принят",
+};
+const docNames = {
+  ready_for_review: "Готово к проверке",
+  review_required: "Нужна проверка",
+  missing: "Нет документа",
+  mismatch: "Есть расхождения",
+  matched: "Поля совпадают",
+  demo_verified: "Демо-проверка",
+  verified: "Проверен",
+  submitted: "Подан",
+  rejected: "Отклонён",
+  expired: "Истёк",
+};
+const state = {
+  storm: false,
+  horizon: 0,
+  selected: null,
+  filter: "all",
+  data: null,
+  detail: null,
+  proposal: null,
+  proposalPriority: "balanced",
+  preview: null,
+  tab: "plan",
+  token: "",
+  nodes: {},
+  map: null,
+  generation: 0,
+  detailGeneration: 0,
+  detailStorm: null,
+  review: null,
+  demo: null,
+};
+const routeParts = location.pathname.split("/").filter(Boolean);
+const passport = routeParts[0] === "app" && routeParts[1] === "shipments" && routeParts.length === 3;
+const queryParams = new URLSearchParams(location.search);
+const tabIds = ["plan", "economics", "documents", "events", "intelligence", "resilience"];
+let passportId;
+if (passport) {
+  try { passportId = decodeURIComponent(routeParts[2]); } catch { passportId = routeParts[2]; }
+  state.selected = passportId;
+}
+try { state.token = sessionStorage.getItem("caspian-operator-token") || ""; } catch {}
+
+let toastTimer, viewAbort, refreshAbort;
+const intelligence = createIntelligencePanel($("#view-intelligence"), api);
+const resilience = createResiliencePanel($("#view-resilience"), api);
+const corridor = createCorridorPanel($("#corridor-panel"), api, () => Boolean(state.demo));
+const operationPanels = [resilience, corridor];
+const query = (storm) =>
+  new URLSearchParams({ storm: String(storm) }).toString();
+const canAnimate = () =>
+  !matchMedia("(prefers-reduced-motion: reduce)").matches;
+async function api(path, options = {}) {
+  const headers = {
+    ...(options.body && !(options.body instanceof FormData)
+      ? { "Content-Type": "application/json" }
+      : {}),
+    ...(state.token ? { "X-Write-Token": state.token } : {}),
+    ...options.headers,
+  };
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      controller.abort(
+        new Error("Сервер не ответил вовремя. Попробуйте ещё раз."),
+      ),
+    35000,
+  );
+  const cancel = () => controller.abort(options.signal.reason);
+  if (options.signal?.aborted) cancel();
+  else options.signal?.addEventListener("abort", cancel, { once: true });
+  try {
+    const res = await fetch(path, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      throw new Error("Сервер вернул некорректный ответ.");
+    }
+    if (!res.ok) {
+      const msg =
+        typeof data.detail === "string"
+          ? data.detail
+          : Array.isArray(data.detail)
+            ? data.detail.map((x) => x.msg).join("; ")
+            : "Не удалось выполнить запрос";
+      const e = new Error(
+        res.status === 401
+          ? "Нужен ключ оператора. Откройте «Ключ доступа»."
+          : msg,
+      );
+      e.status = res.status;
+      throw e;
+    }
+    return data;
+  } catch (error) {
+    if (error instanceof TypeError && !controller.signal.aborted) {
+      throw new Error(
+        "Нет связи с сервером. Проверьте подключение и нажмите «Обновить».",
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", cancel);
+  }
+}
+function notify(message) {
+  clearTimeout(toastTimer);
+  $("#toast").textContent = message;
+  $("#toast").hidden = false;
+  toastTimer = setTimeout(() => ($("#toast").hidden = true), 5500);
+}
+function report(error) {
+  if (error.name === "AbortError") return;
+  $("#api-error").textContent =
+    error.message || "Не удалось связаться с сервером.";
+  $("#api-error").hidden = false;
+  $("#connection-status").textContent = "Нет свежих данных";
+  $("#connection-status").classList.add("error");
+}
+function nodeName(id) {
+  if (!id) return "В пути";
+  return state.nodes[id]?.name || id;
+}
+function routeName(legs = []) {
+  if (!legs.length) return "Маршрут завершён";
+  return [nodeName(legs[0].from), ...legs.map((l) => nodeName(l.to))].join(
+    " → ",
+  );
+}
+function svgArrow() {
+  return "↗";
+}
+function docChip(s) {
+  return `<span class="chip ${["ready_for_review", "matched", "demo_verified", "verified"].includes(s) ? "mint" : "orange"}">${esc(docNames[s] || s || "Не проверен")}</span>`;
+}
+function setBusy(form, busy) {
+  form.classList.toggle("saving", busy);
+  form.setAttribute("aria-busy", String(busy));
+  Array.from(form.elements)
+    .filter((control) => control.type === "submit")
+    .forEach((control) => (control.disabled = busy));
+}
+function setDetailPending(pending) {
+  $("#decision-panel").setAttribute("aria-busy", String(pending));
+  [$("#decision-content"), ...$$(".tab-view")].forEach(
+    (view) => (view.inert = pending),
+  );
+}
+function detailIsCurrent() {
+  return (
+    state.detail?.shipment.id === state.selected &&
+    state.detailStorm === state.storm
+  );
+}
+function activeProposal() {
+  return (
+    state.detail?.proposals?.find((p) => p.id === state.proposal) ||
+    state.detail?.proposals?.[0]
+  );
+}
+function routeProgress(plan, projection, isCurrentPlan) {
+  return calculateRouteProgress(state.detail, plan, projection, state.horizon, isCurrentPlan);
+}
+function sceneRoute(plan) {
+  if (!state.map || !plan) return;
+  const legs = plan.legs || [];
+  let nodes = plan.nodes;
+  if (!nodes?.length)
+    nodes = legs.length ? [legs[0].from, ...legs.map((l) => l.to)] : [];
+  nodes = nodes
+    .map((n) => (typeof n === "string" ? state.nodes[n] : n))
+    .filter(Boolean);
+  state.map.setRoute({ nodes, legs, id: "selected" });
+  updateMapProgress(plan);
+}
+function updateMapProgress(plan = state.detail?.plan) {
+  if (!state.map || !plan) return;
+  const isCurrentPlan = plan === state.detail?.plan;
+  state.map.setProgress(
+    routeProgress(
+      plan,
+      isCurrentPlan ? state.detail?.baseline : plan,
+      isCurrentPlan,
+    ),
+  );
+}
+async function refresh({ keepSelection = true } = {}) {
+  const generation = ++state.generation;
+  const storm = state.storm;
+  refreshAbort?.abort();
+  const request = new AbortController();
+  refreshAbort = request;
+  $("#refresh").disabled = true;
+  $("#connection-status").textContent = "Обновляем…";
+  $("#api-error").hidden = true;
+  try {
+    const data = await api("/api/operations?" + query(storm), {
+      signal: request.signal,
+    });
+    if (generation !== state.generation) return false;
+    state.data = data;
+    const rows = data.shipments || [];
+    if (!passport && (!keepSelection || !rows.some((s) => s.id === state.selected)))
+      state.selected = rows[0]?.id;
+    $("#metric-count").textContent = num(
+      data.summary?.shipment_count ?? rows.length,
+    );
+    $("#metric-late").textContent = num(data.summary?.late_count);
+    $("#metric-risk").textContent = money(data.summary?.financial_risk_usd);
+    $("#metric-docs").textContent = num(data.summary?.documents_blocked_count);
+    $("#cargo-count").textContent = String(rows.length).padStart(2, "0");
+    $("#connection-status").textContent =
+      "Обновлено " +
+      new Date().toLocaleTimeString("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    $("#connection-status").classList.remove("error");
+    const weather = data.horizon?.weather;
+    const sources = {
+      available: "Open-Meteo",
+      partial: "Open-Meteo · часть прогноза недоступна",
+      loading: "источник загружается",
+      unavailable: "прогноз недоступен",
+    };
+    $("#weather-source").textContent =
+      sources[weather?.status] ||
+      weather?.source ||
+      "источник указан в прогнозе";
+    renderList();
+    if (state.selected) return await loadDetail(state.selected);
+    state.detail = null;
+    setDetailPending(false);
+    $("#decision-content").innerHTML =
+      '<p class="empty-state">Создайте первую перевозку.</p>';
+    return true;
+  } catch (e) {
+    if (generation === state.generation) {
+      report(e);
+      if (!detailIsCurrent()) clearDetail();
+    }
+    return false;
+  } finally {
+    if (generation === state.generation) $("#refresh").disabled = false;
+  }
+}
+function passportLink(id, tab = state.tab) {
+  const path = "/app/shipments/" + encodeURIComponent(id);
+  return tab === "plan" ? path : path + "?" + new URLSearchParams({ tab });
+}
+function renderList() {
+  const mobileSwitch = $("#passport-mobile-select");
+  mobileSwitch.innerHTML = (state.data?.shipments || []).map((shipment) =>
+    `<option value="${esc(shipment.id)}" ${shipment.id === state.selected ? "selected" : ""}>${esc(shipment.id)} · ${esc(shipment.name)}</option>`
+  ).join("");
+  const search = $("#cargo-search").value.trim().toLocaleLowerCase();
+  const rows = (state.data?.shipments || []).filter(
+    (s) =>
+      (!search ||
+        (s.id + " " + s.name + " " + s.cargo)
+          .toLocaleLowerCase()
+          .includes(search)) &&
+      (state.filter !== "risk" ||
+        s.blocked ||
+        s.late_h > 0 ||
+        s.financial_risk_usd > 0) &&
+      (state.filter !== "docs" || s.document_status !== "ready_for_review"),
+  );
+  $("#cargo-list").innerHTML =
+    rows
+      .map(
+        (s) =>
+          `<a href="${passportLink(s.id)}" class="cargo-item ${s.id === state.selected ? "selected" : ""}" data-shipment-link="${esc(s.id)}" ${s.id === state.selected ? 'aria-current="page"' : ""}><div class="row"><span class="id">${esc(s.id)}</span><span class="chip ${s.blocked || s.late_h > 0 ? "orange" : "mint"}">${s.blocked ? "Ограничение" : s.late_h > 0 ? "+" + num(s.late_h) + " ч" : s.progress_status === "delivered" ? "Доставлен" : "В работе"}</span></div><strong>${esc(s.name)}</strong><p class="cargo-route">${esc(s.current_node ? nodeName(s.current_node) : "На маршруте")} · ${num(s.weight_t)} т</p><div class="cargo-meta"><span>${when(s.eta)}</span><span class="${s.blocked || s.late_h > 0 ? "late" : ""}">${s.blocked || s.late_h > 0 ? "Есть риск" : "План v" + (s.plan_version ?? 1)}</span></div></a>`,
+      )
+      .join("") || '<p class="empty-state">По этому фильтру перевозок нет.</p>';
+}
+function clearDetail(
+  message = "Данные выбранного груза недоступны. Нажмите «Обновить».",
+) {
+  state.detail = null;
+  state.proposal = null;
+  state.preview = null;
+  $("#decision-content").innerHTML =
+    `<p class="empty-state">${esc(message)}</p>`;
+  state.map?.setRoute({ id: "selected", nodes: [], legs: [] });
+  updateHorizon();
+  $("#detail-title").textContent = "Паспорт перевозки";
+  ["#view-plan", "#view-economics", "#documents-content", "#view-events"]
+    .forEach((selector) => $(selector).replaceChildren());
+  intelligence.clear();
+  operationPanels.forEach((panel) => panel.suspend());
+  setDetailPending(false);
+}
+async function loadDetail(id) {
+  const seq = ++state.detailGeneration;
+  const storm = state.storm;
+  const previousProposal =
+    detailIsCurrent() && id === state.selected ? state.proposal : null;
+  state.selected = id;
+  intelligence.suspend(id);
+  operationPanels.forEach((panel) => panel.suspend(id));
+  renderList();
+  viewAbort?.abort();
+  const request = new AbortController();
+  viewAbort = request;
+  setDetailPending(true);
+  try {
+    const detail = await api(
+      `/api/operations/${encodeURIComponent(id)}?${query(storm)}`,
+      { signal: request.signal },
+    );
+    if (
+      seq !== state.detailGeneration ||
+      storm !== state.storm ||
+      id !== state.selected
+    )
+      return false;
+    state.detail = detail;
+    state.detailStorm = storm;
+    state.preview = null;
+    state.proposal =
+      detail.proposals?.find((p) => p.id === previousProposal)?.id ??
+      detail.proposals?.[0]?.id;
+    renderDetail();
+    const context = {
+      id, storm,
+      status: detail.shipment.progress_status,
+      version: detail.plan.version,
+      sea: detail.baseline?.legs?.some((leg) => leg.mode === "sea"),
+    };
+    intelligence.setContext(context);
+    operationPanels.forEach((panel) => panel.setContext(context));
+    return true;
+  } catch (e) {
+    if (e.name !== "AbortError" && seq === state.detailGeneration) {
+      report(e);
+      clearDetail();
+    }
+    return false;
+  } finally {
+    if (seq === state.detailGeneration) setDetailPending(false);
+  }
+}
+function deltaText(value, formatter) {
+  if (value == null) return "—";
+  const sign = value === 0 ? "" : value < 0 ? "−" : "+";
+  return sign + formatter(Math.abs(value));
+}
+function renderDetail() {
+  const d = state.detail,
+    s = d.shipment,
+    b = d.baseline || {},
+    p = activeProposal();
+  $("#detail-title").textContent = `${s.id} · ${s.name}`;
+  if (passport) {
+    $("#workspace-heading").textContent = s.name;
+    $("#workspace-description").textContent = `${s.id} · ${s.cargo} · План v${d.plan.version}`;
+    document.title = `${s.name} · Caspian`;
+  }
+  const forecastNote = b.blocked
+    ? "Движение по текущему плану ограничено"
+    : b.remaining_h == null
+      ? "Прогноз недоступен"
+      : `${num(b.remaining_h, 1)} ч осталось · ${b.late_h > 0 ? "опоздание " + num(b.late_h, 1) + " ч" : "в пределах заданного срока"}`;
+  const position =
+    s.progress_status === "delivered"
+      ? "Перевозка завершена"
+      : s.progress_status === "in_transit"
+        ? "Груз в движении"
+        : `На узле: ${nodeName(s.current_node)}`;
+  const alternativesTitle = !p ? "Доступных альтернатив нет" : p.delta_h < 0 ? "Можно доставить быстрее" : p.delta_usd < 0 ? "Можно снизить расходы" : "Есть другой маршрут";
+  const currentLeg = d.plan.legs?.find((leg) => leg.id === s.current_leg_id);
+  const locationText = s.progress_status === "in_transit" && currentLeg
+    ? `${nodeName(currentLeg.from)} → ${nodeName(currentLeg.to)}` : nodeName(s.current_node);
+  $("#decision-content").innerHTML = `
+    <div class="passport-position"><span class="passport-label">Где груз</span><strong>${esc(position)}</strong><p>${esc(locationText)}</p></div>
+    <div class="decision-eta"><span>Прибытие по прогнозу</span><strong>${when(b.eta || s.eta)}</strong><small class="${b.blocked || b.late_h > 0 ? "late" : ""}">${forecastNote}</small></div>
+    <div class="passport-facts"><div><span>Осталось расходов</span><strong>${money(b.total_usd)}</strong></div><div><span>Углеродный след остатка</span><strong>${num(b.co2_kg, 1)} кг CO₂</strong></div></div>
+    <div class="recommendation"><div class="eyebrow">СЛЕДУЮЩЕЕ ДЕЙСТВИЕ</div><h4>${alternativesTitle}</h4>
+      ${p ? `<div class="delta-grid"><div><strong>${deltaText(p.delta_h, (v) => num(v, 1) + " ч")}</strong><span>к времени в пути</span></div><div><strong>${deltaText(p.delta_usd, money)}</strong><span>к стоимости</span></div></div><button class="button primary" id="review-plan">Сравнить и принять ↗</button>${p.conditional ? '<p class="passport-conditional">Доступность отдельных участков нужно подтвердить с перевозчиком.</p>' : ''}` : '<p>Добавьте фактическое событие, чтобы уточнить положение и прогноз.</p><button class="button primary" data-open-passport="events">Записать событие ↗</button>'}
+      <p class="decision-footnote">Расчётная оценка. Изменение маршрута требует подтверждения.</p>
+    </div>
+    <div class="decision-shortcuts"><button type="button" class="intelligence-link" data-open-passport="intelligence">Что влияет на прогноз ↗</button><button type="button" class="intelligence-link" data-open-passport="documents">Проверить документы ↗</button></div>`;
+  renderPlan();
+  renderEconomics();
+  renderDocuments();
+  renderEvents();
+  sceneRoute(d.plan);
+  updateHorizon();
+  if (window.gsap && canAnimate())
+    gsap.fromTo(
+      "#decision-content",
+      { opacity: 0.55, x: 8 },
+      { opacity: 1, x: 0, duration: 0.24, overwrite: true },
+    );
+}
+function orderedProposals(detail) {
+  const key = { time: "remaining_h", cost: "total_usd", green: "co2_kg" }[state.proposalPriority];
+  return [...(detail.proposals || [])].sort(key ? (a, b) => (a[key] ?? Infinity) - (b[key] ?? Infinity) : () => 0);
+}
+function proposalChooser(detail) {
+  const proposals = orderedProposals(detail);
+  const button = (p, i) => `<button type="button" class="proposal-option button ${state.proposal === p.id ? "primary" : ""}" data-proposal="${esc(p.id)}" aria-pressed="${state.proposal === p.id}"><span>${i + 1}. ${esc(p.node_names?.join(" → ") || routeName(p.legs))}<small>${num(p.remaining_h, 1)} ч · ${money(p.total_usd)} · ${num(p.co2_kg)} кг CO₂</small></span><span aria-hidden="true">↗</span></button>`;
+  return `<label class="proposal-priority">Что важнее<select id="proposal-priority">${Object.entries({ balanced: "Рекомендованные", time: "Быстрее", cost: "Дешевле", green: "Меньше CO₂" }).map(([value,label]) => `<option value="${value}"${value === state.proposalPriority ? ' selected' : ''}>${label}</option>`).join('')}</select></label>${proposals.slice(0,3).map(button).join('') || '<p>Доступных альтернатив сейчас нет.</p>'}${proposals.length > 3 ? `<details class="proposal-more"><summary>Ещё ${proposals.length - 3} вариантов</summary>${proposals.slice(3).map((p,i) => button(p,i+3)).join('')}</details>` : ''}`;
+}
+function renderPlan() {
+  const d = state.detail,
+    completed = d.plan.completed_leg_ids || [],
+    s = d.shipment;
+  $("#view-plan").innerHTML =
+    `<div class="plan-layout"><div class="plan-legs">${(d.plan.legs || []).map((l, i) => `<div class="plan-leg ${completed.includes(l.id) ? "done" : l.id === s.current_leg_id ? "current" : ""}"><span class="leg-index">${completed.includes(l.id) ? "✓" : i + 1}</span><div><button type="button" class="leg-place" data-focus-node="${esc(l.to)}">${esc(nodeName(l.from))} → ${esc(nodeName(l.to))}<span aria-hidden="true"> ↗</span></button><p>${esc(modes[l.mode] || l.mode)} · ${completed.includes(l.id) ? "Пройдено" : l.id === s.current_leg_id ? "Текущее плечо" : "В плане"}${l.conditional ? " · условное плечо" : ""}</p></div><span class="leg-hours">${num(l.predicted_h ?? l.base_h, 1)} ч</span></div>`).join("")}<p class="form-note">План / факты / прогноз. Завершённые плечи сохраняются при смене маршрута.</p></div><div class="plan-caption"><h4>Варианты от текущего положения</h4>${proposalChooser(d)}<details class="passport-history"><summary>История решений</summary><ul class="version-list">${
+      (d.decisions || [])
+        .slice()
+        .reverse()
+        .map(
+          (x) =>
+            `<li>Принят план v${esc(x.version ?? x.plan_version ?? "—")}<small>${when(x.created_at || x.accepted_at || x.ts)} · ${esc(x.source || "Решение оператора")}</small></li>`,
+        )
+        .join("") || "<li>Исходный план. Новых решений пока нет.</li>"
+    }</ul></details></div></div>`;
+}
+function renderEconomics() {
+  const e = state.detail.economics || {},
+    b = state.detail.baseline || {};
+  $("#view-economics").innerHTML =
+    `<div class="form-layout"><form id="economics-form"><div class="form-grid"><label>Доставить до<input name="deadline" type="datetime-local" value="${esc(localInput(e.deadline))}" required></label><label>Простой, USD / сутки<input type="number" name="idle_cost_per_day" min="0" max="10000000" step="0.01" value="${esc(e.idle_cost_per_day ?? 0)}" required></label><label>Штраф за сутки опоздания, USD<input type="number" name="late_penalty_per_day" min="0" max="10000000" step="0.01" value="${esc(e.late_penalty_per_day ?? 0)}" required></label><label>Перегрузка при смене плана, USD<input type="number" name="reroute_transfer_cost" min="0" max="10000000" step="0.01" value="${esc(e.reroute_transfer_cost ?? 0)}" required></label></div><p class="form-note">Все суммы в USD для сопоставимости с тарифной моделью. Начальные ставки — допущения; задайте условия своей перевозки. Дата — в вашем часовом поясе.</p><p class="form-error" role="alert"></p><button class="button primary">Сохранить и пересчитать ↗</button></form><div><h4 style="font-weight:500;margin-bottom:12px">Стоимость оставшегося пути</h4>${costList(b)}<p class="form-note">Учитываются оставшиеся плечи и расходы текущего сценария. Это расчётная оценка, не коммерческое предложение.</p></div></div>`;
+}
+function costList(b) {
+  return `<ul class="cost-list"><li>Перевозка<strong>${money(b.transport_usd)}</strong></li><li>Простой<strong>${money(b.idle_usd)}</strong></li><li>Опоздание<strong>${money(b.late_usd)}</strong></li><li>Перегрузка<strong>${money(b.transfer_usd)}</strong></li><li class="total">Итого<strong>${money(b.total_usd)}</strong></li></ul>`;
+}
+function renderDocuments() {
+  const docs = state.detail.documents || {},
+    req = docs.requirements || [];
+  $("#documents-content").innerHTML =
+    `<div class="document-grid"><div><div class="document-head" style="margin-bottom:20px"><h4 style="font-weight:500">Комплект перевозки</h4>${docChip(docs.status)}</div>${
+      req
+        .map(
+          (r) =>
+            `<article class="document-item"><div class="document-head"><strong>${esc(r.label || r.key)}</strong>${docChip(r.status)}</div><p>${esc(r.reason || "Проверяется по составу груза и маршруту.")}</p>${(r.mismatches || []).map((m) => `<p class="mismatch">${esc(typeof m === "string" ? m : m.message || JSON.stringify(m))}</p>`).join("")}${
+              r.fields
+                ? `<p>${esc(
+                    Object.entries(r.fields)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(" · "),
+                  )}</p>`
+                : ""
+            }</article>`,
+        )
+        .join("") ||
+      '<p class="empty-state">Требования пока не сформированы.</p>'
+    }<p class="form-note">Проверка комплектности и расхождений. Загрузка файла не означает разрешение таможни.</p></div><div><form id="upload-form" class="upload-box"><h4>Добавить документ</h4><label>Тип документа<select name="kind">${req.map((r) => `<option value="${esc(r.key)}">${esc(r.label || r.key)}</option>`).join("")}</select></label><label style="margin-top:15px">Файл<input type="file" name="file" accept=".txt,.pdf,.png,.jpg,.jpeg" required></label><p class="form-note">PDF, TXT, PNG или JPG · до 2 МБ. Доступность распознавания отображается после загрузки.</p><p class="form-error" role="alert"></p><button class="button primary">Загрузить и проверить ↗</button></form><div class="files-list">${(docs.files || []).map((f) => `<p><strong>${esc(f.filename || f.name)}</strong><br>${esc(f.extraction_status || f.status || "Файл сохранён")} · ${when(f.created_at || f.uploaded_at)}${f.extraction_source ? "<br>" + esc(f.extraction_source) : ""}${f.extraction_note ? "<br>" + esc(f.extraction_note) : ""}</p>`).join("")}</div></div></div>`;
+}
+function renderEvents() {
+  const d = state.detail,
+    active = (d.plan.legs || []).filter(
+      (l) => !(d.plan.completed_leg_ids || []).includes(l.id),
+    );
+  $("#view-events").innerHTML =
+    `<div class="form-layout"><div><h4 style="font-weight:500;margin-bottom:14px">Факты перевозки</h4><ul class="event-list">${
+      (d.events || [])
+        .slice()
+        .reverse()
+        .map(
+          (e) =>
+            `<li><strong>${esc(eventNames[e.event_type] || e.event_type)}</strong><small>${when(e.actual_ts || e.occurred_ts || e.planned_ts || e.received_ts)} · ${esc(e.source || "Не указан")}</small>${e.note ? "<p>" + esc(e.note) + "</p>" : ""}${e.delay_h ? "<p>Дополнительная задержка: " + num(e.delay_h, 1) + " ч</p>" : ""}</li>`,
+        )
+        .join("") || '<li class="muted">Фактических событий пока нет.</li>'
+    }</ul></div><form id="event-form"><div class="form-grid"><label>Событие<select name="event_type"><option value="note">Заметка</option><option value="departure">Отправление</option><option value="arrival">Прибытие</option><option value="delay">Задержка</option><option value="load">Погрузка</option><option value="discharge">Разгрузка</option><option value="customs_start">Проверка документов</option><option value="customs_done">Документы проверены</option></select></label><label>Плечо<select name="leg_id"><option value="">— без привязки —</option>${active.map((l) => `<option value="${esc(l.id)}">${esc(nodeName(l.from))} → ${esc(nodeName(l.to))}</option>`).join("")}</select></label><label>Время факта<input name="occurred_ts" type="datetime-local"></label><label>Задержка, часов<input name="delay_h" type="number" min="0" max="720" step="0.5" value="0"></label></div><label>Комментарий<textarea name="note" maxlength="300" placeholder="Что произошло на маршруте"></textarea></label><p class="form-note">Прибытие и отправление обновляют положение груза. Для них выберите соответствующее плечо. Пустое время означает «сейчас».</p><p class="form-error" role="alert"></p><button class="button primary">Записать событие ↗</button></form></div>`;
+}
+function setTab(tab, { historyMode = "push" } = {}) {
+  if (!tabIds.includes(tab)) tab = "plan";
+  state.tab = tab;
+  if (passport) {
+    $(".desk").hidden = tab !== "plan";
+    if (tab === "plan") requestAnimationFrame(() => { state.map?.resize(); state.map?.resetView(); });
+  }
+  $$("[data-tab]").forEach((b) => {
+    const active = b.dataset.tab === tab;
+    b.setAttribute("aria-selected", String(active));
+    b.tabIndex = active ? 0 : -1;
+  });
+  $$(".tab-view").forEach((v) => (v.hidden = v.id !== `view-${tab}`));
+  $$("[data-shipment-link]").forEach((link) => { link.href = passportLink(link.dataset.shipmentLink, tab); });
+  intelligence.setActive(tab === "intelligence");
+  resilience.setActive(tab === "resilience");
+  corridor.setActive(tab === "documents");
+  if (passport && !state.demo && historyMode) {
+    const url = new URL(location.href);
+    if (tab === "plan") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", tab);
+    if (url.href !== location.href) history[historyMode + "State"](null, "", url);
+  }
+}
+async function setStorm(value) {
+  if (state.storm === value) return detailIsCurrent();
+  state.storm = value;
+  state.detailGeneration++;
+  intelligence.suspend(state.selected);
+  operationPanels.forEach((panel) => panel.suspend(state.selected));
+  viewAbort?.abort();
+  setDetailPending(true);
+  state.preview = null;
+  $("#storm").classList.toggle("active", value);
+  $("#storm").setAttribute("aria-pressed", String(value));
+  $("#calm").classList.toggle("active", !value);
+  $("#calm").setAttribute("aria-pressed", String(!value));
+  $("#scenario-banner").hidden = !value;
+  state.map?.setScenario({ storm: value, horizon: state.horizon });
+  return refresh();
+}
+function updateHorizon(plan = state.preview || state.detail?.plan) {
+  const h = state.horizon;
+  $("#horizon-value").textContent = h ? `+${h} часов` : "Сейчас";
+  updateMapProgress(plan);
+  state.map?.setScenario({ storm: state.storm, horizon: h });
+  const from = Date.parse(state.detail?.horizon?.as_of);
+  const impact =
+    detailIsCurrent() &&
+    state.detail.horizon?.impacts?.find(
+      (item) =>
+        item.shipment_id === state.selected &&
+        Date.parse(item.at) <= from + h * 3600000,
+    );
+  const names = {
+    sea_disruption: "штормовое ограничение",
+    late: "опоздание",
+    reported_delay: "задержка по событию",
+    blocked: "плечо недоступно",
+  };
+  $("#horizon-note").textContent = h
+    ? `${impact ? `На горизонте +${h} ч: ${names[impact.type] || "ограничение"}. ` : ""}Положение через ${h} ч по модели. Факты и принятый план не меняются.`
+    : "Положение груза по модели. Факты не изменяются.";
+}
+function showPlanReview() {
+  if (state.demo) {
+    notify("Закройте демонстрацию, чтобы принять план.");
+    return;
+  }
+  const d = state.detail,
+    p = activeProposal(),
+    dialog = $("#accept-dialog");
+  if (
+    !p ||
+    !detailIsCurrent() ||
+    dialog.open ||
+    dialog.getAttribute("aria-busy") === "true" ||
+    $("#decision-content").inert
+  )
+    return;
+  state.review = {
+    shipmentId: d.shipment.id,
+    proposalId: p.id,
+    version: d.plan.version,
+    storm: state.storm,
+    key: crypto.randomUUID(),
+    stale: false,
+  };
+  $("#accept-confirm").disabled = false;
+  $("#accept-dialog .form-error").textContent = "";
+  $("#accept-summary").innerHTML =
+    `<p class="form-note">${esc(d.shipment.id)} · исходная версия ${esc(d.plan.version)}. Пройденные плечи останутся в истории.</p><h3 style="font-size:18px;margin-bottom:16px">${esc(p.node_names?.join(" → ") || routeName(p.legs))}</h3><div class="form-grid"><div><span class="eyebrow muted">ТЕКУЩИЙ ПЛАН</span><p style="font-size:23px;margin:7px 0">${money(d.baseline.total_usd)}</p><p class="form-note">${when(d.baseline.eta)}<br>${d.baseline.remaining_h == null ? "Прогноз недоступен" : num(d.baseline.remaining_h, 1) + " ч осталось"}</p></div><div><span class="eyebrow" style="color:var(--mint)">НОВЫЙ ПЛАН</span><p style="font-size:23px;color:var(--mint);margin:7px 0">${money(p.total_usd)}</p><p class="form-note">${when(p.eta)}<br>${num(p.remaining_h, 1)} ч осталось</p></div></div>${p.conditional ? '<p class="error-banner">В маршруте есть условные плечи. Их доступность нужно подтвердить с перевозчиком.</p>' : ""}<p class="form-note">${esc(p.document_note || "После изменения плана требования к документам будут проверены заново.")}</p>`;
+  dialog.showModal();
+}
+async function acceptPlan() {
+  const review = state.review;
+  const button = $("#accept-confirm");
+  const dialog = $("#accept-dialog");
+  if (!review || review.stale || button.disabled || !dialog.open) return;
+  button.disabled = true;
+  $("[data-close]", dialog).disabled = true;
+  $(".form-error", dialog).textContent = "";
+  dialog.setAttribute("aria-busy", "true");
+  try {
+    await api(
+      `/api/operations/${encodeURIComponent(review.shipmentId)}/accept?${query(review.storm)}`,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": review.key },
+        body: JSON.stringify({
+          proposal_id: review.proposalId,
+          version: review.version,
+        }),
+      },
+    );
+    dialog.close();
+    notify("Новый план принят. Решение сохранено в истории перевозки.");
+    await refresh();
+  } catch (e) {
+    review.stale = e.status === 409;
+    $(".form-error", dialog).textContent = review.stale
+      ? "Это предложение устарело. Закройте окно и заново сравните обновлённые варианты перед подтверждением."
+      : e.message;
+    if (review.stale) await refresh();
+  } finally {
+    if (state.review === review) {
+      button.disabled = review.stale;
+      $("[data-close]", dialog).disabled = false;
+      dialog.setAttribute("aria-busy", "false");
+    }
+  }
+}
+async function submitForm(form) {
+  if (form.getAttribute("aria-busy") === "true" || !form.reportValidity())
+    return;
+  const editing = ["economics-form", "upload-form", "event-form"].includes(
+    form.id,
+  );
+  if (editing && (!detailIsCurrent() || form.closest("[inert]"))) return;
+  const shipmentId = state.selected;
+  const fd = new FormData(form);
+  $(".form-error", form) && ($(".form-error", form).textContent = "");
+  setBusy(form, true);
+  try {
+    if (form.id === "economics-form") {
+      await api(`/api/operations/${encodeURIComponent(shipmentId)}/economics`, {
+        method: "PUT",
+        body: JSON.stringify({
+          deadline: new Date(fd.get("deadline")).toISOString(),
+          idle_cost_per_day: Number(fd.get("idle_cost_per_day")),
+          late_penalty_per_day: Number(fd.get("late_penalty_per_day")),
+          reroute_transfer_cost: Number(fd.get("reroute_transfer_cost")),
+        }),
+      });
+      notify("Условия сохранены. Варианты пересчитаны.");
+      await refresh();
+    }
+    if (form.id === "upload-form") {
+      const f = fd.get("file");
+      if (f.size > 2 * 1024 * 1024)
+        throw new Error("Максимальный размер файла — 2 МБ.");
+      await api(`/api/operations/${encodeURIComponent(shipmentId)}/documents`, {
+        method: "POST",
+        body: fd,
+      });
+      notify("Документ сохранён. Результат проверки — в паспорте.");
+      await refresh();
+    }
+    if (form.id === "event-form") {
+      const type = fd.get("event_type"),
+        leg = fd.get("leg_id");
+      if (["arrival", "departure", "delay"].includes(type) && !leg)
+        throw new Error("Для этого события выберите плечо маршрута.");
+      const body = {
+        event_type: type,
+        source: "operator-manual",
+        note: fd.get("note") || null,
+        leg_id: leg || null,
+        occurred_ts: fd.get("occurred_ts")
+          ? new Date(fd.get("occurred_ts")).toISOString()
+          : type === "arrival" ? new Date().toISOString() : null,
+      };
+      if (type === "delay") body.delay_h = Number(fd.get("delay_h"));
+      await api(`/api/shipments/${encodeURIComponent(shipmentId)}/events`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      notify("Событие записано. Прогноз обновлён.");
+      await refresh();
+    }
+    if (form.id === "create-form") {
+      const s = await api("/api/shipments", {
+        method: "POST",
+        headers: { "Idempotency-Key": form.dataset.key ||= crypto.randomUUID() },
+        body: JSON.stringify({
+          name: fd.get("name"),
+          cargo: fd.get("cargo"),
+          weight_t: Number(fd.get("weight_t")),
+          route_id: fd.get("route_id"),
+        }),
+      });
+      $("#create-dialog").close();
+      form.reset();
+      delete form.dataset.key;
+      location.assign("/app/shipments/" + encodeURIComponent(s.id || s.shipment?.id));
+    }
+    if (form.id === "access-form") {
+      state.token = String(fd.get("token") || "");
+      try {
+        if (state.token) sessionStorage.setItem("caspian-operator-token", state.token);
+        else sessionStorage.removeItem("caspian-operator-token");
+      } catch {}
+      form.reset();
+      $("#access-dialog").close();
+      notify("Ключ применён к этой вкладке.");
+    }
+  } catch (e) {
+    const error = $(".form-error", form);
+    if (error) error.textContent = e.message;
+    else notify(e.message);
+  } finally {
+    setBusy(form, false);
+  }
+}
+const demoSteps = [
+  [
+    "01 / Перевозка под наблюдением",
+    "Выберите груз: маршрут, документы и прогноз связаны в одном пульте.",
+  ],
+  [
+    "02 / Шторм на Каспии",
+    "Шторм увеличивает ожидание отправления. Система пересчитывает оставшийся путь.",
+  ],
+  [
+    "03 / Есть другой путь",
+    "Сравните альтернативу на карте: выигрыш времени и полную стоимость.",
+  ],
+  [
+    "04 / Граница погрузки",
+    "В примере сокращение очереди помогает успеть на ранний паром. Расписание условное.",
+  ],
+  [
+    "05 / ML и расчёт по правилам",
+    "Сравните оценки задержки, интервал и причины низкой надёжности модели.",
+  ],
+  [
+    "06 / Цифровой коридор",
+    "Проверьте документы и статус подписанных квитанций. Демонстрация не выпускает квитанции.",
+  ],
+];
+function updateDemoProgress(demo) {
+  $("#demo-progress").style.transform =
+    `scaleX(${Math.min(1, demo.elapsed / 90)})`;
+}
+async function demoStep(index) {
+  const demo = state.demo;
+  if (!demo) return;
+  const step = Math.max(0, Math.min(demoSteps.length - 1, index));
+  const request = ++demo.request;
+  demo.step = step;
+  demo.elapsed = step * (90 / demoSteps.length);
+  updateDemoProgress(demo);
+  const [title, text] = demoSteps[step];
+  $("#demo-title").textContent = title;
+  $("#demo-description").textContent = text;
+  $("#demo-prev").disabled = step === 0;
+  $("#demo-next").disabled = step === demoSteps.length - 1;
+  const storm = step === 1 || step === 2;
+  if (state.storm !== storm) await setStorm(storm);
+  else if (
+    !detailIsCurrent() ||
+    $("#decision-panel").getAttribute("aria-busy") === "true"
+  )
+    await refresh();
+  if (state.demo !== demo || demo.request !== request) return;
+  if (step === 2 && detailIsCurrent()) {
+    const proposal = activeProposal();
+    if (proposal) previewRoute(proposal);
+  }
+  const tabs = ["plan", "plan", "plan", "resilience", "intelligence", "documents"];
+  setTab(tabs[step]);
+  if (step === 3) resilience.example();
+  if (step >= 3) {
+    const target = step === 5 ? $("#corridor-panel") : $(".workspace-detail");
+    target.scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
+  }
+}
+async function startDemo() {
+  const start = $("#start-demo");
+  if (state.demo || start.disabled) return;
+  const previous = {
+    storm: state.storm,
+    tab: state.tab,
+    selected: state.selected,
+  };
+  start.disabled = true;
+  try {
+    if (!state.data) await refresh();
+    if (!state.data) {
+      notify("Для демонстрации нужен доступ к серверу.");
+      return;
+    }
+    const demo = { step: 0, elapsed: 0, paused: false, request: 0, previous };
+    state.demo = demo;
+    const seed = state.data.shipments.find(
+      (shipment) => shipment.id === "SHP-1042",
+    );
+    if (passport && passportId !== seed?.id) {
+      state.demo = null;
+      location.assign("/app/shipments/SHP-1042?demo=1");
+      return;
+    }
+    if (seed) state.selected = seed.id;
+    $("#demo-bar").hidden = false;
+    $("#demo-pause").textContent = "Пауза";
+    $("#operations").scrollIntoView({
+      behavior: canAnimate() ? "smooth" : "auto",
+    });
+    await demoStep(0);
+    if (state.demo !== demo) return;
+    demo.timer = setInterval(() => {
+      if (state.demo !== demo || demo.paused || document.hidden) return;
+      demo.elapsed += 0.25;
+      updateDemoProgress(demo);
+      const step = Math.min(
+        demoSteps.length - 1,
+        Math.floor(demo.elapsed / (90 / demoSteps.length)),
+      );
+      if (step !== demo.step) demoStep(step);
+      if (demo.elapsed >= 90) {
+        demo.paused = true;
+        $("#demo-pause").textContent = "Повторить";
+      }
+    }, 250);
+  } finally {
+    start.disabled = false;
+  }
+}
+async function closeDemo() {
+  const demo = state.demo;
+  if (!demo) return;
+  clearInterval(demo.timer);
+  state.demo = null;
+  $("#demo-bar").hidden = true;
+  const previous = demo.previous;
+  if (previous.selected) state.selected = previous.selected;
+  setTab(previous.tab);
+  if (state.storm !== previous.storm) await setStorm(previous.storm);
+  else await refresh();
+}
+async function scenes() {
+  try {
+    const { createMapController } = await import("/static/map-controller.js");
+    state.map = await createMapController($("#ops-map"), {
+      mode: "ops",
+      onPortSelect: (id, node) => showPort(id, node),
+    });
+    if (detailIsCurrent()) sceneRoute(state.preview || state.detail.plan);
+    state.map.setScenario({ storm: state.storm, horizon: state.horizon });
+  } catch (error) {
+    console.warn("Map unavailable:", error);
+    $("#ops-map").innerHTML = '<p class="empty-state">Не удалось загрузить карту. Текстовый маршрут доступен в паспорте.</p>';
+  }
+}
+function showPort(id, mapNode) {
+  const node = state.nodes[id] || mapNode;
+  const label = `${node?.name || id} · ${node?.country || "Узел коридора"}`;
+  const info = $("#port-info");
+  const leg = state.detail?.plan?.legs?.find((item) => item.from === id || item.to === id);
+  info.innerHTML = `<div><strong>${esc(label)}</strong><span>${leg ? "Узел принятого маршрута" : "Вне выбранного маршрута"}</span></div><button type="button" class="text-button" data-dismiss-port aria-label="Закрыть сведения о порте">×</button>`;
+  info.hidden = false;
+}
+function previewRoute(proposal) {
+  state.preview = proposal;
+  sceneRoute(proposal);
+  updateHorizon(proposal);
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button,a");
+  if (!b) return;
+  if (b.dataset.open) {
+    if (b.dataset.open === "access-dialog") $("#access-form [name=token]").value = state.token;
+    $("#" + b.dataset.open).showModal();
+  }
+  if (b.hasAttribute("data-close")) b.closest("dialog").close();
+  if (b.dataset.shipment) {
+    $("#port-info").hidden = true;
+    await loadDetail(b.dataset.shipment);
+  }
+  if (b.dataset.filter) {
+    state.filter = b.dataset.filter;
+    $$("[data-filter]").forEach((x) => {
+      const active = x === b;
+      x.classList.toggle("active", active);
+      x.setAttribute("aria-pressed", String(active));
+    });
+    renderList();
+  }
+  if (b.dataset.tab) setTab(b.dataset.tab);
+  if (b.dataset.focusNode) {
+    state.map?.focusPort(b.dataset.focusNode);
+    showPort(b.dataset.focusNode);
+    $("#ops-map").scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto", block: "center" });
+  }
+  if (b.hasAttribute("data-dismiss-port")) $("#port-info").hidden = true;
+  if (b.hasAttribute("data-fit-route")) {
+    if (state.detail?.plan) sceneRoute(state.detail.plan);
+    state.preview = null;
+    state.map?.fitRoute?.();
+    $("#port-info").hidden = true;
+  }
+  if (b.dataset.openPassport) {
+    const tab = b.dataset.openPassport;
+    setTab(tab);
+    $(`#tab-${tab}`).focus({ preventScroll: true });
+    (tab === "documents" ? $("#corridor-panel") : $(".workspace-detail"))
+      .scrollIntoView({ behavior: canAnimate() ? "smooth" : "auto" });
+  }
+  if (b.dataset.proposal && detailIsCurrent()) {
+    state.proposal = b.dataset.proposal;
+    renderDetail();
+    previewRoute(activeProposal());
+  }
+  if (b.id === "review-plan") showPlanReview();
+});
+document.addEventListener("change", (event) => {
+  if (event.target.id !== "proposal-priority" || !detailIsCurrent()) return;
+  state.proposalPriority = event.target.value;
+  state.proposal = orderedProposals(state.detail)[0]?.id;
+  renderDetail();
+  const proposal = activeProposal();
+  if (proposal) previewRoute(proposal);
+  $("#proposal-priority").focus({ preventScroll: true });
+});
+document.addEventListener("submit", (e) => {
+  if (e.target.matches("form:not(#intelligence-scenario):not(#resilience-form)")) {
+    e.preventDefault();
+    submitForm(e.target);
+  }
+});
+$$("[role=tab]").forEach((tab) =>
+  tab.addEventListener("keydown", (e) => {
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(e.key)) return;
+    e.preventDefault();
+    const tabs = $$("[role=tab]"),
+      i = tabs.indexOf(tab),
+      next =
+        e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? tabs.length - 1
+            : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) %
+              tabs.length;
+    setTab(tabs[next].dataset.tab);
+    tabs[next].focus();
+  }),
+);
+$("#cargo-search").addEventListener("input", renderList);
+$("#passport-mobile-select").addEventListener("change", (event) => {
+  if (event.target.value) location.assign(passportLink(event.target.value));
+});
+$("#refresh").addEventListener("click", () => refresh());
+$("#calm").addEventListener("click", () => setStorm(false));
+$("#storm").addEventListener("click", () => setStorm(true));
+$("#horizon").addEventListener("input", (e) => {
+  state.horizon = Number(e.target.value);
+  updateHorizon();
+});
+$("#accept-confirm").addEventListener("click", acceptPlan);
+$("#start-demo")?.addEventListener("click", startDemo);
+$("#demo-close").addEventListener("click", closeDemo);
+$("#demo-prev").addEventListener("click", () => {
+  if (state.demo) demoStep(state.demo.step - 1);
+});
+$("#demo-next").addEventListener("click", () => {
+  if (state.demo) demoStep(state.demo.step + 1);
+});
+$("#demo-pause").addEventListener("click", () => {
+  if (!state.demo) return;
+  if (state.demo.elapsed >= 90) {
+    state.demo.paused = false;
+    demoStep(0);
+  } else state.demo.paused = !state.demo.paused;
+  $("#demo-pause").textContent = state.demo.paused ? "Продолжить" : "Пауза";
+});
+$("#accept-dialog").addEventListener("cancel", (event) => {
+  if (event.currentTarget.getAttribute("aria-busy") === "true")
+    event.preventDefault();
+});
+window.addEventListener("offline", () => {
+  notify("Нет сети. Изменения станут доступны после подключения.");
+  $("#connection-status").textContent = "Нет сети";
+});
+window.addEventListener("online", () => refresh());
+window.addEventListener(
+  "pagehide",
+  (event) => {
+    if (event.persisted) return;
+    state.map?.dispose();
+    clearInterval(state.demo?.timer);
+    viewAbort?.abort();
+    refreshAbort?.abort();
+    intelligence.suspend();
+    operationPanels.forEach((panel) => panel.suspend());
+  },
+  { once: true },
+);
+async function init() {
+  if (passport) {
+    document.body.classList.add("passport-v2");
+    $("#workspace-refresh").hidden = false;
+    $("#workspace-refresh").addEventListener("click", () => refresh());
+    // Put navigation before its content: documents and forecasts open directly.
+    $(".detail-top").after($(".desk"));
+    $(".map-toolbar > .mono").outerHTML = '<button type="button" class="text-button" data-fit-route>Весь маршрут ↗</button>';
+    const horizon = $(".horizon");
+    const scenario = document.createElement("details");
+    scenario.className = "passport-simulation";
+    const summary = document.createElement("summary");
+    summary.textContent = "Посмотреть движение на 72 часа вперёд";
+    horizon.before(scenario);
+    scenario.append(summary, horizon);
+    $(".decision-panel .panel-title h3").textContent = "Состояние груза";
+  }
+  const deepTab = queryParams.get("tab");
+  setTab(deepTab || "plan", { historyMode: "" });
+  window.addEventListener("popstate", () =>
+    setTab(new URLSearchParams(location.search).get("tab") || "plan", { historyMode: "" }));
+  if (queryParams.has("create")) $("#create-dialog").showModal();
+  try {
+    const d = await api("/api/nodes");
+    state.nodes = Object.fromEntries(d.nodes.map((n) => [n.id, n]));
+  } catch (e) {
+    report(e);
+  }
+  await Promise.allSettled([scenes(), refresh()]);
+  if (queryParams.has("demo")) {
+    const url = new URL(location.href);
+    url.searchParams.delete("demo");
+    history.replaceState(null, "", url);
+    startDemo();
+  } else if (deepTab && deepTab !== "plan" && tabIds.includes(deepTab) && state.tab === deepTab) {
+    $(".workspace-detail").scrollIntoView({ behavior: canAnimate() ? "smooth" : "instant" });
+  }
+  if ("serviceWorker" in navigator)
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+init();

@@ -17,6 +17,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,7 +111,8 @@ CREATE TABLE IF NOT EXISTS events (
     mode TEXT,
     confidence TEXT,
     note TEXT,
-    correction_of TEXT
+    correction_of TEXT,
+    delay_h REAL
 );
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
@@ -124,10 +126,76 @@ CREATE TABLE IF NOT EXISTS port_updates (
     note TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS operation_economics (
+    shipment_id TEXT PRIMARY KEY,
+    deadline TEXT NOT NULL,
+    idle_cost_per_day REAL NOT NULL,
+    late_penalty_per_day REAL NOT NULL,
+    reroute_transfer_cost REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS operation_plans (
+    shipment_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    leg_ids_json TEXT NOT NULL,
+    completed_leg_ids_json TEXT NOT NULL,
+    decision_json TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    PRIMARY KEY (shipment_id, version),
+    UNIQUE (shipment_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS operation_files (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT UNIQUE NOT NULL,
+    shipment_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    content BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS operation_files_shipment ON operation_files (shipment_id, seq);
+CREATE TABLE IF NOT EXISTS ml_snapshots (
+    id TEXT PRIMARY KEY,
+    shipment_id TEXT NOT NULL,
+    forecast_at TEXT NOT NULL,
+    plan_version INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    idempotency_key TEXT,
+    UNIQUE (shipment_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS ml_snapshots_shipment ON ml_snapshots (shipment_id, forecast_at);
+CREATE TABLE IF NOT EXISTS corridor_receipts (
+    shipment_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL,
+    id TEXT NOT NULL UNIQUE,
+    idempotency_key TEXT NOT NULL,
+    receipt_json TEXT NOT NULL,
+    PRIMARY KEY (shipment_id, sequence),
+    UNIQUE (shipment_id, idempotency_key)
+);
+CREATE TABLE IF NOT EXISTS workspace_tasks (
+    id TEXT PRIMARY KEY,
+    shipment_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    owner TEXT NOT NULL DEFAULT '',
+    due_at TEXT,
+    priority TEXT NOT NULL CHECK (priority IN ('normal', 'high', 'critical')),
+    status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'done')),
+    note TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL CHECK (version >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL UNIQUE,
+    creation_hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workspace_tasks_shipment ON workspace_tasks (shipment_id);
+CREATE TRIGGER IF NOT EXISTS remove_workspace_tasks_for_deleted_shipment
+    AFTER DELETE ON shipments BEGIN
+        DELETE FROM workspace_tasks WHERE shipment_id = OLD.id;
+    END;
 INSERT OR IGNORE INTO counters (name, value) VALUES ('shipment', 2000);
 """
 
 _migrate_lock = threading.Lock()
+_bootstrap_lock = threading.Lock()
 _migrated = False
 
 
@@ -146,11 +214,32 @@ def _connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=FULL")
-    conn.executescript(_SCHEMA)
-    _migrate_legacy_once()
-    return conn
+    try:
+        # A fresh database needs an exclusive lock to enter WAL. Two
+        # simultaneous first requests may otherwise get SQLITE_BUSY here
+        # before the ordinary busy timeout on their transaction applies.
+        with _bootstrap_lock:
+            _ensure_wal(conn)
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.executescript(_SCHEMA)
+            _migrate_legacy_once()
+        return conn
+    except BaseException:
+        conn.close()
+        raise
+
+
+def _ensure_wal(conn: sqlite3.Connection) -> None:
+    for attempt in range(6):
+        try:
+            if conn.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            return
+        except sqlite3.OperationalError as exc:
+            # Also allow another server process to finish its first connection.
+            if getattr(exc, "sqlite_errorcode", None) not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED) or attempt == 5:
+                raise
+            time.sleep(0.02 * (attempt + 1))
 
 
 def _migrate_legacy_once() -> None:
@@ -160,15 +249,16 @@ def _migrate_legacy_once() -> None:
     with _migrate_lock:
         if _migrated:
             return
-        _migrated = True
         _migrate_schema()
         _migrate_legacy_shipments()
         _migrate_legacy_ledger()
+        _migrated = True
 
 
 def _migrate_schema() -> None:
     """Add columns introduced after v1 to an existing database."""
     with sqlite3.connect(DB_PATH, timeout=15) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         cols = {r[1] for r in conn.execute("PRAGMA table_info(ledger)")}
         for col, ddl in (
             ("issuer", "TEXT"),
@@ -177,6 +267,8 @@ def _migrate_schema() -> None:
         ):
             if col not in cols:
                 conn.execute(f"ALTER TABLE ledger ADD COLUMN {col} {ddl}")
+        if "delay_h" not in {r[1] for r in conn.execute("PRAGMA table_info(events)")}:
+            conn.execute("ALTER TABLE events ADD COLUMN delay_h REAL")
 
 
 def _migrate_legacy_shipments() -> None:
@@ -276,11 +368,11 @@ def list_shipments() -> list[dict]:
     return [_shipment_dict(r) for r in rows]
 
 
-def get_shipment(shipment_id: str) -> dict | None:
-    with _conn() as conn:
-        r = conn.execute(
-            "SELECT * FROM shipments WHERE id=?", (shipment_id,)
-        ).fetchone()
+def get_shipment(shipment_id: str, conn: sqlite3.Connection | None = None) -> dict | None:
+    if conn is None:
+        with _conn() as reader:
+            return get_shipment(shipment_id, reader)
+    r = conn.execute("SELECT * FROM shipments WHERE id=?", (shipment_id,)).fetchone()
     return _shipment_dict(r) if r else None
 
 
@@ -498,12 +590,13 @@ def _doc_dict(r: sqlite3.Row) -> dict:
     }
 
 
-def get_documents(shipment_id: str) -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM documents WHERE shipment_id=? ORDER BY doc_type",
-            (shipment_id,),
-        ).fetchall()
+def get_documents(shipment_id: str, conn: sqlite3.Connection | None = None) -> list[dict]:
+    if conn is None:
+        with _conn() as reader:
+            return get_documents(shipment_id, reader)
+    rows = conn.execute(
+        "SELECT * FROM documents WHERE shipment_id=? ORDER BY doc_type", (shipment_id,)
+    ).fetchall()
     return [_doc_dict(r) for r in rows]
 
 
@@ -572,6 +665,7 @@ EVENT_TYPES = (
     "customs_done",
     "delay",
     "note",
+    "route_plan_accepted",
 )
 
 
@@ -590,6 +684,8 @@ def add_event(
     note: str | None = None,
     correction_of: str | None = None,
     event_id: str | None = None,
+    delay_h: float | None = None,
+    conn: sqlite3.Connection | None = None,
 ) -> dict:
     import uuid
 
@@ -597,28 +693,21 @@ def add_event(
         raise ValueError(f"invalid event_type {event_type}")
     eid = event_id or uuid.uuid4().hex
     received = datetime.now(timezone.utc).isoformat()
-    with _conn() as conn:
-        conn.execute(
-            "INSERT INTO events (id,shipment_id,leg_id,event_type,planned_ts,actual_ts,"
-            "occurred_ts,received_ts,source,location,mode,confidence,note,correction_of) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                eid,
-                shipment_id,
-                leg_id,
-                event_type,
-                planned_ts,
-                actual_ts,
-                occurred_ts,
-                received,
-                source,
-                location,
-                mode,
-                confidence,
-                note,
-                correction_of,
-            ),
-        )
+    params = (
+        eid, shipment_id, leg_id, event_type, planned_ts, actual_ts,
+        occurred_ts, received, source, location, mode, confidence, note,
+        correction_of, delay_h,
+    )
+    sql = (
+        "INSERT INTO events (id,shipment_id,leg_id,event_type,planned_ts,actual_ts,"
+        "occurred_ts,received_ts,source,location,mode,confidence,note,correction_of,delay_h) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    )
+    if conn is None:
+        with _conn() as writer:
+            writer.execute(sql, params)
+    else:
+        conn.execute(sql, params)
     return {
         "id": eid,
         "shipment_id": shipment_id,
@@ -634,16 +723,17 @@ def add_event(
         "confidence": confidence,
         "note": note,
         "correction_of": correction_of,
+        "delay_h": delay_h,
     }
 
 
-def list_events(shipment_id: str) -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM events WHERE shipment_id=? "
-            "ORDER BY COALESCE(occurred_ts, received_ts)",
-            (shipment_id,),
-        ).fetchall()
+def list_events(shipment_id: str, conn: sqlite3.Connection | None = None) -> list[dict]:
+    if conn is None:
+        with _conn() as reader:
+            return list_events(shipment_id, reader)
+    rows = conn.execute(
+        "SELECT * FROM events WHERE shipment_id=? ORDER BY received_ts, rowid", (shipment_id,)
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -686,9 +776,11 @@ def set_port_update(
     }
 
 
-def get_port_updates() -> dict[str, dict]:
-    with _conn() as conn:
-        rows = conn.execute("SELECT * FROM port_updates ORDER BY port_id").fetchall()
+def get_port_updates(conn: sqlite3.Connection | None = None) -> dict[str, dict]:
+    if conn is None:
+        with _conn() as reader:
+            return get_port_updates(reader)
+    rows = conn.execute("SELECT * FROM port_updates ORDER BY port_id").fetchall()
     return {r["port_id"]: dict(r) for r in rows}
 
 
@@ -718,6 +810,7 @@ def status() -> dict:
 def reset_demo() -> dict:
     """Clear user-created runtime state; static seed data is untouched."""
     with _conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         n_ship = conn.execute("SELECT COUNT(*) c FROM shipments").fetchone()["c"]
         n_led = conn.execute("SELECT COUNT(*) c FROM ledger").fetchone()["c"]
         conn.execute("DELETE FROM shipments")
@@ -725,4 +818,10 @@ def reset_demo() -> dict:
         conn.execute("DELETE FROM documents")
         conn.execute("DELETE FROM events")
         conn.execute("DELETE FROM port_updates")
+        conn.execute("DELETE FROM operation_economics")
+        conn.execute("DELETE FROM operation_plans")
+        conn.execute("DELETE FROM operation_files")
+        conn.execute("DELETE FROM ml_snapshots")
+        conn.execute("DELETE FROM corridor_receipts")
+        conn.execute("DELETE FROM workspace_tasks")
     return {"shipments_removed": n_ship, "ledger_entries_removed": n_led}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "project": "Smart Caspian Transit",
+  "brief": "Первый экран для логиста, который следит за морским плечом и сравнивает маршруты груза.",
+  "round": "01",
+  "nativeViewport": "1440x900",
+  "candidates": [
+    {
+      "id": "atlas", "name": "Ночной диспетчерский атлас",
+      "concept": "Крупный Каспий и выделенный маршрут ведут от рейса к решению.",
+      "typography": "IBM Plex Sans и JetBrains Mono",
+      "palette": ["#07131B", "#8BE3C3", "#FF784F"],
+      "traits": ["Крупный заголовок сбоку от моря", "Мятная траектория", "Одно действие"],
+      "source": "atlas.html"
+    },
+    {
+      "id": "hydro", "name": "Гидрографическая карта",
+      "concept": "Карта занимает левую часть рабочего стола, данные рейса собраны в правой панели.",
+      "typography": "IBM Plex Sans и JetBrains Mono",
+      "palette": ["#E7ECE7", "#173940", "#90B9BF"],
+      "traits": ["Разметка картографической сеткой", "Маршрут в виде поля данных", "Светлая панель"],
+      "source": "hydro.html"
+    },
+    {
+      "id": "editorial", "name": "Маршрутный журнал",
+      "concept": "Экран читается как разворот с заголовком, картой и переходом к планированию.",
+      "typography": "Georgia, IBM Plex Sans и JetBrains Mono",
+      "palette": ["#EEE2CE", "#402E25", "#873F2C"],
+      "traits": ["Наборная антиква", "Бумажный фон", "Картографическая врезка"],
+      "source": "editorial.html"
+    }
+  ]
+}

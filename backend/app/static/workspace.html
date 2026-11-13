@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f7fa" />
+  <title>Рабочая платформа · Caspian</title>
+  <link rel="icon" href="/static/assets/brand/mark.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/vendor/fonts.css" />
+  <link rel="stylesheet" href="/static/command.css" />
+  <link rel="stylesheet" href="/static/intelligence-panel.css" />
+  <link rel="stylesheet" href="/static/operations-labs.css" />
+  <link rel="stylesheet" href="/static/workspace.css" />
+  <script defer src="/static/vendor/gsap/gsap.min.js"></script>
+  <script type="module" src="/static/workspace.js"></script>
+  <!-- DETAIL_SCRIPT -->
+</head>
+<body class="workspace-page">
+  <a class="skip" href="#workspace-main">К содержимому</a>
+  <aside class="workspace-sidebar" aria-label="Разделы платформы">
+    <a class="brand workspace-brand" href="/app"><img src="/static/assets/brand/mark.svg" alt="" width="36" height="36" /><span>caspian<span class="brand-dot">/</span><small>SMART TRANSIT</small></span></a>
+    <button type="button" class="workspace-menu-toggle" aria-expanded="false" aria-controls="platform-navigation">Разделы <span aria-hidden="true">☰</span></button>
+    <nav class="workspace-nav" id="platform-navigation" aria-label="Платформа">
+      <a href="/app" data-workspace-nav="overview"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>Рабочий стол</a>
+      <a href="/app/shipments" data-workspace-nav="shipments"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18v14H3zM3 10h18M8 6V4m8 2V4M8 15h8"/></svg>Перевозки</a>
+      <a href="/app/map" data-workspace-nav="map"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m3 6 6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15"/></svg>Карта</a>
+      <a href="/app/risks" data-workspace-nav="risks"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 2 20h20zM12 9v5m0 3v1"/></svg>Риски и задачи</a>
+      <a href="/app/documents" data-workspace-nav="documents"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 3h9l5 5v13H5zM14 3v5h5M8 12h8m-8 4h8"/></svg>Документы</a>
+      <a href="/app/analytics" data-workspace-nav="analytics"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20h16M6 16v-4m6 4V8m6 8V4"/></svg>Аналитика</a>
+    </nav>
+    <div class="workspace-side-tools">
+      <button type="button" class="text-button" data-open="access-dialog">Ключ доступа</button>
+      <a href="/">На главную ↗</a>
+    </div>
+  </aside>
+  <main class="workspace-main" id="workspace-main">
+    <header class="workspace-head">
+      <div><p class="workspace-breadcrumb" id="workspace-breadcrumb" hidden></p><h1 id="workspace-heading">Платформа</h1><p id="workspace-description"></p></div>
+      <div class="workspace-head-actions">
+        <button type="button" class="button compact" id="workspace-refresh" hidden>Обновить</button>
+        <button type="button" class="button compact" id="start-demo" hidden>Демо · 90 секунд</button>
+        <button type="button" class="button primary compact" data-open="create-dialog">Новый груз <span aria-hidden="true">+</span></button>
+      </div>
+    </header>
+    <div id="workspace-content" role="region" aria-label="Рабочие данные"><p class="workspace-status" role="status">Получаем данные…</p></div>
+    <!-- DISPATCHER -->
+  </main>
+  <!-- DIALOGS -->
+</body>
+</html>
